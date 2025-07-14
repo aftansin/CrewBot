@@ -4,8 +4,8 @@ After=network.target
 
 [Service]
 EnvironmentFile=/etc/environment
-ExecStart=/home/ubuntu/crewbot/venv/bin/python main.py
-ExecReload=/home/ubuntu/crewbot/venv/bin/python main.py
+ExecStart=/root/CrewBot/venv/bin/python main.py
+ExecReload=/root/CrewBot/venv/bin/python main.py
 WorkingDirectory=/home/ubuntu/crewbot/
 KillMode=process
 Restart=always

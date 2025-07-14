@@ -9,15 +9,15 @@
 Полезные команды:
 - ```pip freeze > requirements.txt```
 
-Что бы создать службу работы - сделать символьную ссылку на файл ```english_bot.service``` 
-в ```/etc/systemd/system/aviabot.service``` командой:
-- ```ln english_bot.service /etc/systemd/system/aviabot.service```
+Что бы создать службу работы - сделать символьную ссылку на файл ```crewbot.service``` 
+в ```/etc/systemd/system/crewbot.service``` командой:
+- ```ln crewbot.service /etc/systemd/system/crewbot.service```
 
 Активировать автозапуск службы командой
-- ```systemctl enable aviabot.service```
+- ```systemctl enable crewbot.service```
 
 На сервере посмотреть лог работы скрипта можно так:
-- ```journalctl -r -u aviabot```
+- ```journalctl -r -u crewbot```
 
 Есть пользователи. У каждого подписной календарь с событиями.
 - хранить в бд все данные о событии
