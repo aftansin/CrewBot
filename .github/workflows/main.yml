@@ -1,0 +1,19 @@
+name: CrewBot
+
+on: [push]
+# Деплой на сервер
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: executing remote ssh commands to deploy
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.HOST }}
+          username: ${{ secrets.USER }}
+          key: ${{ secrets.SSH_KEY }}
+          script: |
+            sudo systemctl stop crewbot
+            cd ~/CrewBot
+            git pull
+            sudo systemctl start crewbot

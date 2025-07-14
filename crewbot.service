@@ -1,12 +1,12 @@
 [Unit]
-Description=Nordwind Database Bot
+Description=CrewBot
 After=network.target
 
 [Service]
 EnvironmentFile=/etc/environment
-ExecStart=/home/ubuntu/aviabot/venv/bin/python main.py
-ExecReload=/home/ubuntu/aviabot/venv/bin/python main.py
-WorkingDirectory=/home/ubuntu/aviabot/
+ExecStart=/home/ubuntu/crewbot/venv/bin/python main.py
+ExecReload=/home/ubuntu/crewbot/venv/bin/python main.py
+WorkingDirectory=/home/ubuntu/crewbot/
 KillMode=process
 Restart=always
 RestartSec=5
