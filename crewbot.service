@@ -1,0 +1,15 @@
+[Unit]
+Description=Nordwind Database Bot
+After=network.target
+
+[Service]
+EnvironmentFile=/etc/environment
+ExecStart=/home/ubuntu/aviabot/venv/bin/python main.py
+ExecReload=/home/ubuntu/aviabot/venv/bin/python main.py
+WorkingDirectory=/home/ubuntu/aviabot/
+KillMode=process
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
