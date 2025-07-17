@@ -1,5 +1,4 @@
 import asyncio
-import logging
 import os
 
 from aiogram.client.default import DefaultBotProperties
@@ -10,6 +9,8 @@ from dotenv import load_dotenv
 
 from aiogram import Bot, Dispatcher
 from aiogram.enums import ParseMode
+from loguru import logger
+from notifiers.logging import NotificationHandler
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
 from db.models import Base
@@ -20,12 +21,6 @@ from middlewares.is_admin import IsAdminMiddleware
 from middlewares.scheduler import SchedulerMiddleware
 from middlewares.track_all_users import TrackAllUsersMiddleware
 from utils.scheduler import start_all_calendar_polling
-
-logging.basicConfig()
-logging.basicConfig(
-    level=logging.INFO,
-    format='#%(levelname)-8s %(name)s:%(funcName)s - %(message)s'
-)
 
 load_dotenv()
 
@@ -64,7 +59,7 @@ async def main() -> None:
         await start_all_calendar_polling(bot, session, scheduler)
     scheduler.start()
 
-    logging.info("Including middlewares")
+    logger.info("Including middlewares")
     dp.update.outer_middleware(IsAdminMiddleware())
     dp.update.outer_middleware(DatabaseMiddleware(sessionmaker))
     dp.update.outer_middleware(TrackAllUsersMiddleware())
@@ -74,4 +69,9 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
+    # Конфигурируем логирование
+    params = {'token': TOKEN, 'chat_id': ADMIN_ID}
+    telegram_handler = NotificationHandler("telegram", defaults=params)
+    logger.add(telegram_handler, level="INFO", format="{level} {message}")
+    logger.add("debug.log", rotation="1 MB")
     asyncio.run(main())
