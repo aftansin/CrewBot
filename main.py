@@ -59,7 +59,7 @@ async def main() -> None:
         await start_all_calendar_polling(bot, session, scheduler)
     scheduler.start()
 
-    logger.info("Including middlewares")
+    print("Including middlewares")
     dp.update.outer_middleware(IsAdminMiddleware())
     dp.update.outer_middleware(DatabaseMiddleware(sessionmaker))
     dp.update.outer_middleware(TrackAllUsersMiddleware())

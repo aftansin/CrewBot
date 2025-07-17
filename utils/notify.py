@@ -43,8 +43,8 @@ def extract_crew_with_positions(description: str) -> list[dict]:
 async def notify_new_event(bot: Bot, chat_id: int, event: Event):
     """Уведомление о новом событии"""
     message = (
-        "Добавлен новый полет:\n"
-        f"<b>{event.summary}</b>\n"
+        "Добавлен новый полет:\n\n"
+        f"<b>{event.summary}</b>\n\n"
         f"📅 {format_datetime(event.dtstart)} - {format_datetime(event.dtend)}\n\n"
         f"<pre>{event.description}</pre>"
     )

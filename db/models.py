@@ -1,5 +1,6 @@
 from datetime import datetime
 from uuid import UUID, uuid4
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import ForeignKey, BigInteger, String, DateTime, func, Uuid, Index
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -39,12 +40,14 @@ class Event(Base):
     pilot_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("pilot.id"))
     summary: Mapped[str] = mapped_column(String)
     description: Mapped[str] = mapped_column(String)
-    dtstart: Mapped[datetime] = mapped_column(DateTime(timezone=True))
-    dtend: Mapped[datetime] = mapped_column(DateTime(timezone=True))
-    last_updated: Mapped[datetime] = mapped_column(
+    dtstart: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=datetime.now(),
-        server_default=func.now())
+        default=lambda: datetime.now(ZoneInfo('Europe/Moscow'))
+    )
+    dtend: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(ZoneInfo('Europe/Moscow'))
+    )
     hash: Mapped[str] = mapped_column(String(32))  # Для отслеживания изменений
 
     pilot: Mapped[Pilot] = relationship("Pilot", back_populates="events")  # для связи ORM
