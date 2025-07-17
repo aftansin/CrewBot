@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import ForeignKey, BigInteger, String, DateTime, func, Uuid
+from sqlalchemy import ForeignKey, BigInteger, String, DateTime, func, Uuid, Index
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.orm import DeclarativeBase
 
@@ -19,7 +19,10 @@ class Pilot(Base):
     first_name: Mapped[str | None] = mapped_column(String)
     middle_name: Mapped[str | None] = mapped_column(String)
     last_name: Mapped[str | None] = mapped_column(String)
-    registration_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    registration_date: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=datetime.now(),
+        server_default=func.now())
     subscription_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     ics_url: Mapped[str | None] = mapped_column(String)
 
@@ -32,12 +35,21 @@ class Pilot(Base):
 class Event(Base):
     __tablename__ = 'event'
 
-    uuid: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4, server_default=func.gen_random_uuid())
-    event_id: Mapped[int] = mapped_column(BigInteger)
+    event_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)  # Используем event_id как primary key
     pilot_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("pilot.id"))
     summary: Mapped[str] = mapped_column(String)
     description: Mapped[str] = mapped_column(String)
     dtstart: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     dtend: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    last_updated: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=datetime.now(),
+        server_default=func.now())
+    hash: Mapped[str] = mapped_column(String(32))  # Для отслеживания изменений
 
     pilot: Mapped[Pilot] = relationship("Pilot", back_populates="events")  # для связи ORM
+
+    __table_args__ = (
+        Index('idx_event_pilot_id', 'pilot_id', 'event_id'),  # Составной индекс для быстрого поиска
+    )
+

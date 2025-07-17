@@ -1,6 +1,11 @@
-from sqlalchemy import select, update
+import asyncio
+import zoneinfo
+from datetime import datetime, timedelta, timezone
+
+from sqlalchemy import select, update, and_
 from sqlalchemy.dialects.postgresql import insert as upsert
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
 from db.models import Pilot, Event
 
@@ -56,17 +61,32 @@ async def get_pilot_event_by_id(session: AsyncSession, pilot_id: int, event_id: 
 
 async def insert_pilot_event(session: AsyncSession, pilot_id: int, event):
     # Создаём новый объект события
-    new_event = Event(
-        event_id=event.get('event_id'),
-        summary=event.get('summary'),
-        description=event.get('description'),
-        dtstart=event.get('dtstart'),
-        dtend=event.get('dtend'),
-        pilot_id=pilot_id
-    )
-    session.add(new_event)  # Добавляем новый объект в сессию
+    session.add(event)  # Добавляем новый объект в сессию
     await session.commit()  # Фиксируем изменения в базе данных
-    return new_event
+    return event
+
+
+async def get_pilot_events_from_yesterday_ascending(session: AsyncSession, pilot_id: int):
+    # Получаем текущую дату и вычисляем вчерашний день
+    today = datetime.now()
+    yesterday = today - timedelta(days=1)
+
+    # Формируем запрос: события для указанного пилота, начиная со вчерашнего дня,
+    # отсортированные по возрастанию dtstart
+    stmt = (
+        select(Event)
+        .where(
+            and_(
+                Event.pilot_id == pilot_id,
+                Event.dtstart >= yesterday
+            )
+        )
+        .order_by(Event.dtstart.asc())
+    )
+
+    result = await session.execute(stmt)
+    events = result.scalars().all()
+    return events
 
 
 async def update_ics_link(session: AsyncSession, pilot_id: int, ics_url: str | None):
@@ -82,3 +102,22 @@ async def update_pilot_full_name(session: AsyncSession, pilot_id: int, full_name
         middle_name=full_name[2])
     await session.execute(stmt)
     await session.commit()
+
+
+async def test():
+    engine = create_async_engine(url='sqlite+aiosqlite:///database.db', echo=True)
+    sessionmaker = async_sessionmaker(engine, expire_on_commit=False)
+    now = datetime.now(zoneinfo.ZoneInfo('Europe/Moscow'))
+    async with sessionmaker() as session:
+        pilot_events = await get_pilot_events_from_yesterday_ascending(session, 438391677)
+        for e in pilot_events:
+            print(e.dtstart.replace(tzinfo=zoneinfo.ZoneInfo('Europe/Moscow')))
+            dtstart = e.dtstart.replace(tzinfo=zoneinfo.ZoneInfo('Europe/Moscow'))
+            print(now)
+            print('##########')
+            print(e.dtstart > now)
+        # existing_events = {e.event_id: e for e in pilot_events if e.dtstart >= now}
+        # print(existing_events)
+
+if __name__ == "__main__":
+    asyncio.run(test())

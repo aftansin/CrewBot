@@ -11,7 +11,7 @@ from aiogram_dialog.widgets.text import Const, Format
 from db.db_requests import update_ics_link
 from states.start import StartState
 from utils.getters import pilot_data_getter, qr_code_getter
-from utils.scheduler import start_pilot_calendar_polling, remove_pilot_calendar_polling_job
+from utils.scheduler import start_pilot_calendar_polling, remove_pilot_calendar_polling_job, check_pilot_calendar
 
 
 async def go_ics_window(callback: CallbackQuery, button: Button, dialog_manager: DialogManager):
@@ -41,8 +41,11 @@ async def correct_url_handler(
     session = dialog_manager.middleware_data.get('session')
     scheduler = dialog_manager.middleware_data.get('scheduler')
     await message.answer(text=f'Success!')
+    await dialog_manager.done()
     await update_ics_link(session, pilot.id, text)
+    await check_pilot_calendar(bot, session, pilot)
     await start_pilot_calendar_polling(bot, session, scheduler, pilot)
+
 
 
 # Хэндлер, который сработает на ввод некорректного возраста

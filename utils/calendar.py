@@ -1,51 +1,58 @@
+import logging
 import re
 from collections import Counter
+from pprint import pprint
 from typing import Optional, Tuple
 
+import aiohttp
 import requests
 from fake_useragent import UserAgent
 from icalendar import Calendar
 
 
+# Инициализируем логгер модуля
+logger = logging.getLogger(__name__)
+
 # Базовая функция загрузки данных календаря. Возвращает календарь или None.
 async def get_calendar_data(url: str):
-    ua = UserAgent()
+    """Асинхронная загрузка календаря с кешированием заголовков"""
     headers = {
-        "Accept": "text/calendar, */*;q=0.9",  # Важно для ICS
-        "User-Agent": ua.random  # Случайный User-Agent
+        "Accept": "text/calendar",
+        "User-Agent": "iOS/17.0 (iPhone) CalendarAgent/185"
     }
-    response = requests.get(url, headers=headers)  # TODO сделать async requests
-    if response.status_code == 200:
-        # Загружаем календарь
-        ics_content = response.text
-        calendar_data = Calendar.from_ical(ics_content)
-        if calendar_data.walk("VEVENT"):
-            return calendar_data
-        else:
-            print('Календарь пустой')
-    else:
-        print("Ошибка:", response.status_code, response.text)
-    return
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=headers) as response:
+                if response.status == 200:
+                    ics_content = await response.text()
+                    return Calendar.from_ical(ics_content)
+                logger.error(f"Calendar fetch error: {response.status}")
+                return None
+    except Exception as e:
+        logger.error(f"Calendar fetch exception: {e}")
+        return None
 
 
 # Парсинг событий календаря. Возвращает словарь событий или None.
 async def get_events_from_calendar(calendar_data):
     # Если календарь пустой, то вернем None
     if not calendar_data:
-        return
-    events = list()
+        return None
+    events_dict = list()
     for event in calendar_data.walk("VEVENT"):
         event_id = event.get("UID")  # ID
         summary = event.get("summary")  # Событие
         description = event.get("description")  # Описание
         dtstart = event.get("dtstart").dt  # Начало
         dtend = event.get("dtend").dt  # Конец
-        events.append({'event_id': int(event_id),
+        events_dict.append({'event_id': int(event_id),
                        'summary': str(summary),
                        'description': str(description),
                        'dtstart': dtstart,
                        'dtend': dtend})
-    return events
+    sorted_events_dict = sorted(events_dict, key=lambda x: x['dtstart'])
+    return sorted_events_dict
 
 
 # Парсинг календаря. Возвращает tuple ФИО календаря или None.
@@ -53,7 +60,7 @@ async def get_most_frequent_user(calendar_data) -> Optional[Tuple[str, str, str]
     data_summary = list()
     # Если календарь пустой, то вернем None
     if not calendar_data:
-        return
+        return None
     for event in calendar_data.walk("VEVENT"):
         description = event.get("description")  # Описание
         data_summary.append(str(description))
@@ -74,7 +81,3 @@ async def get_most_frequent_user(calendar_data) -> Optional[Tuple[str, str, str]
         return most_common_user[0][0]  # возвращаем кортеж (ФИО)
     else:
         return None  # если пользователей нет
-
-
-
-
