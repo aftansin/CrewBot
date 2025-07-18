@@ -14,7 +14,9 @@ from notifiers.logging import NotificationHandler
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
 from db.models import Base
+from dialogs.account import account_dialog
 from dialogs.start import start_dialog
+from handlers.help import help_router
 from handlers.start import start_router
 from middlewares.database import DatabaseMiddleware
 from middlewares.is_admin import IsAdminMiddleware
@@ -43,6 +45,8 @@ async def main() -> None:
     )
     dp.include_router(start_router)
     dp.include_router(start_dialog)
+    dp.include_router(account_dialog)
+    dp.include_router(help_router)
     setup_dialogs(dp)
 
     bot = Bot(token=TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))

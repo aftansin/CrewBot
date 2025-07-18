@@ -9,6 +9,7 @@ from aiogram_dialog.widgets.media import DynamicMedia
 from aiogram_dialog.widgets.text import Const, Format
 
 from db.db_requests import update_ics_link
+from states.account import AccountState
 from states.start import StartState
 from utils.getters import pilot_data_getter, qr_code_getter
 from utils.scheduler import start_pilot_calendar_polling, remove_pilot_calendar_polling_job, check_pilot_calendar
@@ -67,6 +68,10 @@ async def clear_ics_button(callback: CallbackQuery, button: Button, dialog_manag
     await remove_pilot_calendar_polling_job(scheduler, pilot)
 
 
+async def go_account_dialog_button(callback: CallbackQuery, button: Button, dialog_manager: DialogManager):
+    await dialog_manager.start(state=AccountState.first_page)
+
+
 def first_window():
     return Window(
         Const(text='🤖 <b>Main Menu</b>'),
@@ -75,7 +80,7 @@ def first_window():
                    on_click=go_ics_window),
             Button(text=Const(' 💳  My data'),
                    id='account_button',
-                   on_click=None)),
+                   on_click=go_account_dialog_button)),
         Button(text=Const('☕️  By me coffee'),
                id='donate',
                on_click=go_donate_window,
