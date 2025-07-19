@@ -69,7 +69,7 @@ async def clear_ics_button(callback: CallbackQuery, button: Button, dialog_manag
 
 
 async def go_account_dialog_button(callback: CallbackQuery, button: Button, dialog_manager: DialogManager):
-    await dialog_manager.start(state=AccountState.first_page)
+    await dialog_manager.start(state=AccountState.account_info)
 
 
 def first_window():

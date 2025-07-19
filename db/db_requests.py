@@ -89,6 +89,13 @@ async def get_pilot_events_from_yesterday_ascending(session: AsyncSession, pilot
     return events
 
 
+async def get_pilot_events(session: AsyncSession, pilot_id: int):
+    stmt = (select(Event).where(Event.pilot_id == pilot_id)).order_by(Event.dtstart.asc())
+    result = await session.execute(stmt)
+    events = result.scalars().all()
+    return events
+
+
 async def update_ics_link(session: AsyncSession, pilot_id: int, ics_url: str | None):
     stmt = update(Pilot).where(Pilot.id == pilot_id).values(ics_url=ics_url)
     await session.execute(stmt)

@@ -1,8 +1,8 @@
+import re
 from datetime import datetime
-from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import ForeignKey, BigInteger, String, DateTime, func, Uuid, Index
+from sqlalchemy import ForeignKey, BigInteger, String, DateTime, func, Index
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.orm import DeclarativeBase
 
@@ -56,3 +56,42 @@ class Event(Base):
         Index('idx_event_pilot_id', 'pilot_id', 'event_id'),  # Составной индекс для быстрого поиска
     )
 
+    @property
+    def short_summary(self) -> str:
+        return get_short_summary(self)
+
+
+def get_short_summary(event: Event) -> str:
+    # TODO Доработать
+    date_str = event.dtstart.strftime('%d.%m.%y')
+
+    # Обработка полетов (содержит ✈️)
+    if '✈️' in event.summary:
+        # Разбиваем строку по стрелке →
+        parts = event.summary.split('→')
+        if len(parts) >= 2:
+            departure_part = parts[0]
+            arrival_part = parts[1]
+
+            # Обрабатываем вылет
+            dep_city = departure_part.split('(')[0].strip()
+
+            # Обрабатываем прилет
+            arr_city = arrival_part.split('(')[0].strip()
+
+            # Формируем результат
+            return f"{date_str} {dep_city} → {arr_city}"
+
+    # Обработка медицинских комиссий
+    if event.summary.startswith('💉'):
+        return f"{date_str} {event.summary.split('\n')[0].strip()}"
+
+    # Обработка тренажеров
+    if event.summary.startswith('📋'):
+        return f"{date_str} {event.summary.split('\n')[0].strip()}"
+
+    # Для других событий
+    first_line = event.summary.split('\n')[0][:20].strip()
+    if len(event.summary.split('\n')[0]) > 20:
+        first_line += '...'
+    return f"{date_str} {first_line}"
