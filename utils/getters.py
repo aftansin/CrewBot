@@ -22,5 +22,5 @@ async def qr_code_getter(**kwargs):
 
 
 async def user_events_getter(dialog_manager: DialogManager, **middleware_data):
-    pilot_id = middleware_data.get('db_pilot').id
-    return {'events': await get_pilot_events(middleware_data.get('session'), pilot_id)}
+    events = dialog_manager.dialog_data.get('events')
+    return {'events': events}

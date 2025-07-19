@@ -1,11 +1,16 @@
 import operator
+from datetime import datetime
+from pprint import pprint
+from zoneinfo import ZoneInfo
 
 from aiogram import F
 from aiogram.types import CallbackQuery
 from aiogram_dialog import Dialog, Window, DialogManager
 from aiogram_dialog.widgets.kbd import Cancel, Button, ScrollingGroup, Select, Back
 from aiogram_dialog.widgets.text import Const, Format
+from sqlalchemy.util import await_only
 
+from db.db_requests import get_pilot_events
 from states.account import AccountState
 from utils.getters import pilot_data_getter, user_events_getter
 
@@ -32,7 +37,24 @@ async def on_chosen_event(callback: CallbackQuery, widget: Select, dialog_manage
 
 
 async def go_events_window(callback: CallbackQuery, button: Button, dialog_manager: DialogManager):
+    pilot_id = dialog_manager.middleware_data.get('db_pilot').id
+    events = await get_pilot_events(dialog_manager.middleware_data.get('session'), pilot_id)
+    # Сохраняем в dialog_data для использования в user_events_getter
+    dialog_manager.dialog_data['events'] = events
+
+    # Найдем страницу с ближайшим событием для отображения по умолчанию
+    now = datetime.now(ZoneInfo('Europe/Moscow'))
+    closest_index = 0
+    min_diff = float('inf')
+    for i, event in enumerate(events):
+        diff = abs((event.dtstart - now).total_seconds())
+        if diff < min_diff:
+            min_diff = diff
+            closest_index = i
+    page = closest_index // 5  # 5 - height из ScrollingGroup
+
     await dialog_manager.switch_to(state=AccountState.events_window)
+    await dialog_manager.find('events_ids').set_page(page)
 
 
 def account_info_window():
@@ -59,9 +81,9 @@ def account_info_window():
 
 def events_window():
     return Window(
-        Const("<b>Наряд:</b>"),
+        Const("<b>🛫 Текущий наряд:</b>"),
         paginated_events(on_chosen_event),
-        Back(Const('Back')),
+        Back(Const('◀️ Back')),
         state=AccountState.events_window,
         getter=user_events_getter
     )
