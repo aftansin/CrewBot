@@ -47,7 +47,12 @@ async def go_events_window(callback: CallbackQuery, button: Button, dialog_manag
     closest_index = 0
     min_diff = float('inf')
     for i, event in enumerate(events):
-        diff = abs((event.dtstart - now).total_seconds())
+        # Приводим dtstart к aware datetime, если он naive
+        event_time = event.dtstart
+        if event_time.tzinfo is None:
+            event_time = event_time.replace(tzinfo=ZoneInfo('Europe/Moscow'))
+
+        diff = abs((event_time - now).total_seconds())
         if diff < min_diff:
             min_diff = diff
             closest_index = i
