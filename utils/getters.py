@@ -1,3 +1,6 @@
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
+
 from aiogram.enums import ContentType
 from aiogram_dialog import DialogManager
 from aiogram_dialog.api.entities import MediaAttachment
@@ -22,5 +25,60 @@ async def qr_code_getter(**kwargs):
 
 
 async def user_events_getter(dialog_manager: DialogManager, **middleware_data):
-    events = dialog_manager.dialog_data.get('events')
-    return {'events': events}
+    events = dialog_manager.dialog_data.get('events', [])
+
+    now = datetime.now(ZoneInfo('Europe/Moscow'))
+    current_month_num = now.month
+    current_year = now.year
+
+    # Инициализируем переменные для хранения времени
+    current_month_duration = timedelta()
+    prev_month_duration = timedelta()
+    next_month_duration = timedelta()
+
+    for event in events:
+        # Пропускаем события без символа ✈️
+        if '✈️' not in event.summary:
+            continue
+
+        # Приводим dtstart к aware datetime, если он naive
+        event_time = event.dtstart
+        if event_time.tzinfo is None:
+            event_time = event_time.replace(tzinfo=ZoneInfo('Europe/Moscow'))
+
+        # Рассчитываем длительность полета
+        try:
+            duration = event.dtend - event.dtstart
+            # Игнорируем отрицательные длительности (ошибки в данных)
+            if duration.total_seconds() < 0:
+                continue
+        except:
+            continue
+
+        # Определяем месяц события
+        event_month = event_time.month
+        event_year = event_time.year
+
+        # Классифицируем по месяцам
+        if event_year == current_year:
+            if event_month == current_month_num:
+                current_month_duration += duration
+            elif event_month == current_month_num - 1 or (current_month_num == 1 and event_month == 12):
+                prev_month_duration += duration
+            elif event_month == current_month_num + 1 or (current_month_num == 12 and event_month == 1):
+                next_month_duration += duration
+
+    # Конвертируем timedelta в часы и минуты
+    def format_duration(delta):
+        total_seconds = delta.total_seconds()
+        hours = int(total_seconds // 3600)
+        minutes = int((total_seconds % 3600) // 60)
+        return f"{hours}ч {minutes}м" if hours or minutes else "0ч 0м"
+
+    return {
+        'events': events,
+        'current_month_time': format_duration(current_month_duration),
+        'previous_month_time': format_duration(prev_month_duration),
+        'next_month_time': format_duration(next_month_duration),
+        'has_flights': any('✈️' in e.summary for e in events)  # Флаг наличия полетов
+    }

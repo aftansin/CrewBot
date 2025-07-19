@@ -86,7 +86,12 @@ def account_info_window():
 
 def events_window():
     return Window(
-        Const("<b>🛫 Текущий наряд:</b>"),
+        Const("<b>Данные о налете:\n</b>"),
+        Format("Налет за предыдущий месяц: {previous_month_time}", when="has_flights"),
+        Format("<b>Налет за текущий месяц:</b> {current_month_time}", when="has_flights"),
+        Format("Налет на следующий месяц: {next_month_time}", when="has_flights"),
+        Const("Нет данных о полетах", when=~F["has_flights"]),
+        Const("\n<pre>Для точного подсчета налета, необходимо подкорректировать каждый рейс за месяц.</pre>"),
         paginated_events(on_chosen_event),
         Back(Const('◀️ Back')),
         state=AccountState.events_window,
