@@ -82,13 +82,13 @@ def account_info_window():
 
 def events_window():
     return Window(
-        Const("<b>Flight Time Data:</b>"),
+        Const("<b>Flight Time Data:</b>", when="has_flights"),
+        Const("<b>❗️No data.</b>", when=~F["has_flights"]),
         Format("• Last month: {previous_month_time}", when="has_flights"),
         Format("• <b>Current month:</b> {current_month_time}", when="has_flights"),
         Format("• Next month: {next_month_time}", when="has_flights"),
-        Const("No data.", when=~F["has_flights"]),
         Const("\n<i>To accurately calculate the flight time, it's necessary to adjust each flight.</i>",
-              when=~F["has_flights"]),
+              when=F["has_flights"]),
         paginated_events(on_chosen_event),
         Back(Const('◀️ Back')),
         state=AccountState.events_window,
