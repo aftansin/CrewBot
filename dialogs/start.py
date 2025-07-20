@@ -1,10 +1,8 @@
-from pprint import pprint
-
 from aiogram import F
 from aiogram.types import CallbackQuery, Message
 from aiogram_dialog import DialogManager, Dialog, Window
 from aiogram_dialog.widgets.input import TextInput, ManagedTextInput
-from aiogram_dialog.widgets.kbd import Button, Row, Back, Cancel
+from aiogram_dialog.widgets.kbd import Button, Back, Cancel
 from aiogram_dialog.widgets.media import DynamicMedia
 from aiogram_dialog.widgets.text import Const, Format
 
@@ -74,13 +72,14 @@ async def go_account_dialog_button(callback: CallbackQuery, button: Button, dial
 
 def first_window():
     return Window(
-        Const(text='🤖 <b>Main Menu</b>'),
-        Row(Button(text=Const('🔗 Calendar link'),
+        Const(text='🤖 <b>Main Menu.</b>'),
+        Const(text='<i>To close dialog press exit button.</i>'),
+        Button(text=Const(' 💳  My data'),
+               id='account_button',
+               on_click=go_account_dialog_button),
+        Button(text=Const('🔗 Calendar link'),
                    id='ics_button',
                    on_click=go_ics_window),
-            Button(text=Const(' 💳  My data'),
-                   id='account_button',
-                   on_click=go_account_dialog_button)),
         Button(text=Const('☕️  By me coffee'),
                id='donate',
                on_click=go_donate_window,

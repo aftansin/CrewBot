@@ -76,9 +76,6 @@ def account_info_window():
         Button(text=Const('🛫 Show events'),
                id='my_flights_button',
                on_click=go_events_window),
-        Button(text=Const('Delete account'),
-               id='delete_account_button',
-               on_click=None),
         Cancel(Const('◀️ Back'), id='exit'),
         getter=pilot_data_getter,
         state=AccountState.account_info
