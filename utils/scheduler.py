@@ -1,5 +1,5 @@
 import json
-import re
+import random
 from datetime import datetime, timedelta
 from hashlib import md5
 from zoneinfo import ZoneInfo
@@ -26,27 +26,6 @@ def calculate_event_hash(event: dict) -> str:
         'dtend': event['dtend'].isoformat()
     }
     return md5(json.dumps(data, sort_keys=True).encode()).hexdigest()
-
-
-def extract_crew_with_positions(description: str) -> list[dict]:
-    """
-    Извлекает ФИО и должности членов экипажа
-    Возвращает список словарей с ключами: last_name, first_name, middle_name, position
-    """
-    # Регулярное выражение для строки с ФИО и должностью
-    pattern = r"([А-ЯЁ][а-яё]+)\s+([А-ЯЁ][а-яё]+)(?:\s+([А-ЯЁ][а-яё]+))?\s*\(([^)]+)\)"
-    matches = re.findall(pattern, description)
-
-    crew = []
-    for match in matches:
-        last, first, mid, pos = match
-        crew.append({
-            'last_name': last,
-            'first_name': first,
-            'middle_name': mid if mid else None,
-            'position': pos
-        })
-    return crew
 
 
 # ОСНОВНАЯ ФУНКЦИЯ
@@ -174,8 +153,7 @@ async def check_pilot_calendar(bot: Bot, session: AsyncSession, pilot: Pilot):
 async def start_pilot_calendar_polling(bot, session, scheduler, pilot):
     scheduler.add_job(
         check_pilot_calendar,
-        IntervalTrigger(hours=3),
-        # IntervalTrigger(seconds=10),
+        IntervalTrigger(seconds=random.randint(4500, 7200)),
         kwargs={'bot': bot, 'session': session, 'pilot': pilot},
         id=f'{pilot.id}_calendar_polling',
         replace_existing=True

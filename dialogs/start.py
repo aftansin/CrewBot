@@ -77,7 +77,7 @@ def first_window():
         Button(text=Const(' 💳  My data'),
                id='account_button',
                on_click=go_account_dialog_button),
-        Button(text=Const('🔗 Calendar link'),
+        Button(text=Const('🌐 ics link'),
                    id='ics_button',
                    on_click=go_ics_window),
         Button(text=Const('☕️  By me coffee'),

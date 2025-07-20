@@ -1,3 +1,4 @@
+import re
 from datetime import datetime, timedelta
 from pprint import pprint
 from zoneinfo import ZoneInfo
@@ -7,6 +8,7 @@ from aiogram_dialog import DialogManager
 from aiogram_dialog.api.entities import MediaAttachment
 
 from db.db_requests import get_pilot_events, get_pilot_event_by_id
+from utils.notify import extract_crew_with_positions
 
 
 async def pilot_data_getter(dialog_manager: DialogManager, **middleware_data):
@@ -90,10 +92,20 @@ async def event_info_getter(dialog_manager: DialogManager, **middleware_data):
     event_id = int(context.dialog_data.get('event_id'))
     user_id = middleware_data.get('event_from_user').id
     db_event = await get_pilot_event_by_id(session, user_id, event_id)
+    dtstart = db_event.dtstart.astimezone(ZoneInfo('Europe/Moscow')).strftime("%d.%m.%Y  %H:%M (%Z)")
+    dtend = db_event.dtend.astimezone(ZoneInfo('Europe/Moscow')).strftime("%d.%m.%Y  %H:%M (%Z)")
+
+    pattern = r"^\s*([А-ЯЁа-яёA-Za-z-]+\s[А-ЯЁа-яёA-Za-z-]+(?:\s[А-ЯЁа-яёA-Za-z-]+)?)\s*\((КВС|2П|СБ)\)"
+    # Ищем все совпадения в тексте
+    matches = re.findall(pattern, db_event.description, re.MULTILINE)
+    crew_list = [f"{name.strip()} ({position})" for name, position in matches]
+    crew_str = '\n'.join(crew_list)
+
+    short_summary = db_event.short_summary.split(' ', 1)[1]
     return {'event_id': db_event.event_id,
             'pilot_id': db_event.pilot_id,
             'summary': db_event.summary,
-            'description': db_event.description,
-            'dtstart': db_event.dtstart.date(),
-            'dtend': db_event.dtend.date(),
-            'short_summary': db_event.short_summary}
+            'crew': crew_str if crew_list else db_event.description,
+            'dtstart': dtstart,
+            'dtend': dtend,
+            'short_summary': short_summary}
