@@ -101,6 +101,11 @@ def event_info():
         Format("• ↗️ {dtstart}"),
         Format("• ↘️ {dtend}"),
         Format("\n<pre>{crew}</pre>"),
+        Format("\n{is_past}"),
+        # Button(text=Const('Edit times'),
+        #        id='edit_times_button',
+        #        on_click=None,
+        #        when=F['ics_url']),
         Back(Const('◀️ Back')),
         state=AccountState.event_info,
         getter=event_info_getter

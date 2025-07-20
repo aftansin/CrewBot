@@ -101,6 +101,12 @@ async def event_info_getter(dialog_manager: DialogManager, **middleware_data):
     crew_list = [f"{name.strip()} ({position})" for name, position in matches]
     crew_str = '\n'.join(crew_list)
 
+    # Проверяем, закончилось ли событие
+    now = datetime.now(ZoneInfo('Europe/Moscow'))
+    event_end = db_event.dtend.astimezone(ZoneInfo('Europe/Moscow'))
+    is_past = now > event_end
+
+
     short_summary = db_event.short_summary.split(' ', 1)[1]
     return {'event_id': db_event.event_id,
             'pilot_id': db_event.pilot_id,
@@ -108,4 +114,5 @@ async def event_info_getter(dialog_manager: DialogManager, **middleware_data):
             'crew': crew_str if crew_list else db_event.description,
             'dtstart': dtstart,
             'dtend': dtend,
-            'short_summary': short_summary}
+            'short_summary': short_summary,
+            'is_past': is_past}
