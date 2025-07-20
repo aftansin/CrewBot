@@ -1,11 +1,12 @@
 from datetime import datetime, timedelta
+from pprint import pprint
 from zoneinfo import ZoneInfo
 
 from aiogram.enums import ContentType
 from aiogram_dialog import DialogManager
 from aiogram_dialog.api.entities import MediaAttachment
 
-from db.db_requests import get_pilot_events
+from db.db_requests import get_pilot_events, get_pilot_event_by_id
 
 
 async def pilot_data_getter(dialog_manager: DialogManager, **middleware_data):
@@ -82,3 +83,17 @@ async def user_events_getter(dialog_manager: DialogManager, **middleware_data):
         'next_month_time': format_duration(next_month_duration),
         'has_flights': any('✈️' in e.summary for e in events)  # Флаг наличия полетов
     }
+
+async def event_info_getter(dialog_manager: DialogManager, **middleware_data):
+    session = middleware_data.get('session')
+    context = dialog_manager.current_context()
+    event_id = int(context.dialog_data.get('event_id'))
+    user_id = middleware_data.get('event_from_user').id
+    db_event = await get_pilot_event_by_id(session, user_id, event_id)
+    return {'event_id': db_event.event_id,
+            'pilot_id': db_event.pilot_id,
+            'summary': db_event.summary,
+            'description': db_event.description,
+            'dtstart': db_event.dtstart.date(),
+            'dtend': db_event.dtend.date(),
+            'short_summary': db_event.short_summary}

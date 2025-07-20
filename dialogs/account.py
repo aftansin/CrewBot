@@ -8,11 +8,10 @@ from aiogram.types import CallbackQuery
 from aiogram_dialog import Dialog, Window, DialogManager
 from aiogram_dialog.widgets.kbd import Cancel, Button, ScrollingGroup, Select, Back
 from aiogram_dialog.widgets.text import Const, Format
-from sqlalchemy.util import await_only
 
 from db.db_requests import get_pilot_events
 from states.account import AccountState
-from utils.getters import pilot_data_getter, user_events_getter
+from utils.getters import pilot_data_getter, user_events_getter, event_info_getter
 
 
 def paginated_events(on_event_click):
@@ -95,7 +94,16 @@ def events_window():
         getter=user_events_getter
     )
 
+def event_info():
+    return Window(
+        Format("{short_summary}"),
+        Back(Const('◀️ Back')),
+        state=AccountState.event_info,
+        getter=event_info_getter
+    )
+
 account_dialog = Dialog(
     account_info_window(),
-    events_window()
+    events_window(),
+    event_info()
 )
