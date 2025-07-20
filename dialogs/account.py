@@ -83,7 +83,7 @@ def account_info_window():
 def events_window():
     return Window(
         Const("<b>Flight Time Data:</b>", when="has_flights"),
-        Const("<b>❗️No data.</b>", when=~F["has_flights"]),
+        Const("<b>❗️No data yet. Check your ics link.</b>", when=~F["has_flights"]),
         Format("• Last month: {previous_month_time}", when="has_flights"),
         Format("• <b>Current month:</b> {current_month_time}", when="has_flights"),
         Format("• Next month: {next_month_time}", when="has_flights"),
