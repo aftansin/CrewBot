@@ -1,6 +1,5 @@
 import operator
 from datetime import datetime
-from pprint import pprint
 from zoneinfo import ZoneInfo
 
 from aiogram import F
@@ -101,7 +100,6 @@ def event_info():
         Format("• ↗️ {dtstart}"),
         Format("• ↘️ {dtend}"),
         Format("\n<pre>{crew}</pre>"),
-        Format("\n{is_past}"),
         Button(text=Const('Edit flight times'),
                id='edit_times_button',
                on_click=None,

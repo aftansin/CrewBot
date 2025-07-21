@@ -11,7 +11,7 @@ from db.models import Event
 # Вспомогательные функции
 def format_datetime(dt: datetime) -> str:
     """Форматирует datetime для сообщений"""
-    return dt.astimezone(ZoneInfo('Europe/Moscow')).strftime('%d.%m.%Y %H:%M')
+    return dt.astimezone(ZoneInfo('Europe/Moscow')).strftime("%d.%m.%Y  %H:%M (%Z)")
 
 
 def format_crew_member(member: dict) -> str:
@@ -43,9 +43,10 @@ def extract_crew_with_positions(description: str) -> list[dict]:
 async def notify_new_event(bot: Bot, chat_id: int, event: Event):
     """Уведомление о новом событии"""
     message = (
-        "Добавлен новый полет:\n\n"
-        f"<b>{event.summary}</b>\n\n"
-        f"📅 {format_datetime(event.dtstart)} - {format_datetime(event.dtend)}\n\n"
+        "<b>New event!</b>\n"
+        f"<pre>{event.summary}</pre>\n"
+        f"• ↗️ {format_datetime(event.dtstart)}\n"
+        f"• ↘️ {format_datetime(event.dtend)}\n\n"
         f"<pre>{event.description}</pre>"
     )
     await bot.send_message(chat_id, message, parse_mode="HTML")
@@ -60,21 +61,23 @@ async def notify_updated_event(bot: Bot, chat_id: int, old_values: dict, new_eve
         if old.strip() != new.strip():
             changes.append(
                 f"📝 {field_name}:\n"
-                f"<code>{old[:200] + ('...' if len(old) > 200 else '')}</code>\n→\n"
-                f"<code>{new[:200] + ('...' if len(new) > 200 else '')}</code>"
+                f"{old[:200] + ('...' if len(old) > 200 else '')}\n→\n"
+                f"{new[:200] + ('...' if len(new) > 200 else '')}"
             )
             return True
         return False
 
     # Проверяем изменения для каждого поля
-    for field in ['summary', 'dtstart', 'dtend']:
+    for field in ['summary', 'description', 'dtstart', 'dtend']:
         old_val = old_values[field]
         new_val = new_event[field]
 
         if old_val != new_val:
             if field in ('dtstart', 'dtend'):
                 changes.append(
-                    f"🕒 {field}: {format_datetime(old_val)} → {format_datetime(new_val)}"
+                    f"{field}\n"
+                    f"🕒 was: {format_datetime(old_val)}\n"
+                    f"🕒 now  {format_datetime(new_val)}"
                 )
             else:
                 compare_text(str(old_val), str(new_val), field)
@@ -95,9 +98,9 @@ async def notify_updated_event(bot: Bot, chat_id: int, old_values: dict, new_eve
             # Проверяем изменения по каждому члену экипажа
             for i, (old_member, new_member) in enumerate(zip_longest(old_crew, new_crew, fillvalue=None)):
                 if old_member is None:
-                    crew_changes.append(f"➕ Добавлен: {format_crew_member(new_member)}")
+                    crew_changes.append(f"➕ Added: {format_crew_member(new_member)}")
                 elif new_member is None:
-                    crew_changes.append(f"➖ Удален: {format_crew_member(old_member)}")
+                    crew_changes.append(f"➖ Removed: {format_crew_member(old_member)}")
                 elif old_member != new_member:
                     changes_str = []
                     for key in ['last_name', 'first_name', 'middle_name', 'position']:
@@ -120,8 +123,8 @@ async def notify_updated_event(bot: Bot, chat_id: int, old_values: dict, new_eve
 
     if changes:
         message = (
-                "🔄 Изменения в полете:\n"
-                f"<b>{new_event['summary']}</b>\n\n" +
+                "🔄 <b>Changes in event:</b>\n"
+                f"<pre>{new_event['summary']}</pre>\n" +
                 "\n".join(changes)
         )
         await bot.send_message(chat_id, message, parse_mode="HTML")
@@ -130,8 +133,8 @@ async def notify_updated_event(bot: Bot, chat_id: int, old_values: dict, new_eve
 async def notify_deleted_event(bot: Bot, chat_id: int, event: Event):
     """Уведомление об удалении события"""
     message = (
-        "❌ Полет отменен:\n"
-        f"<b>{event.summary}</b>\n"
-        f"Был запланирован на {format_datetime(event.dtstart)}"
+        "❌ <b>Event deleted:</b>\n"
+        f"<pre>{event.summary}</pre>\n"
+        f"📅 {format_datetime(event.dtstart)}"
     )
     await bot.send_message(chat_id, message, parse_mode="HTML")
