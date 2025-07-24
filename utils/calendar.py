@@ -24,14 +24,10 @@ async def get_calendar_data(url: str):
             async with session.get(url, headers=headers) as response:
                 if response.status == 200:
                     ics_content = await response.text()
-                    print(ics_content)
                     return Calendar.from_ical(ics_content)
                 else:
                     logger.error(f"Calendar fetch error: {response.status}")
                     return None
-
-            # with open('utils/test.txt', 'r', encoding='utf-8') as file:
-            #     return Calendar.from_ical(file.read())
 
     except Exception as e:
         logger.error(f"Calendar fetch exception: {e}")
