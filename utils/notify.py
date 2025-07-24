@@ -1,8 +1,8 @@
 import re
 from datetime import datetime
-from itertools import zip_longest
 from zoneinfo import ZoneInfo
 
+import regex
 from aiogram import Bot
 
 from db.models import Event
@@ -14,36 +14,22 @@ def format_datetime(dt: datetime) -> str:
     return dt.astimezone(ZoneInfo('Europe/Moscow')).strftime("%d.%m.%Y  %H:%M (%Z)")
 
 
-def format_crew_member(member: dict) -> str:
-    """Форматирует информацию о члене экипажа"""
-    name = f"{member['last_name']} {member['first_name']}"
-    if member['middle_name']:
-        name += f" {member['middle_name']}"
-    return f"{name} ({member['position']})"
+def strip_summary(summary: str) -> str:
+    """Форматирует summary для сообщений"""
+    return regex.sub(r'\s*\((?:[^()]++|(?R))*\)\s*', ' ', summary).strip()
 
 
-def remove_crew_from_description(desc: str) -> str:
-    """Удаляет блок с экипажем из описания"""
-    return re.sub(r'\n.*\([КВС2ПБ].*$', '', desc, flags=re.MULTILINE)
-
-
-def extract_crew_with_positions(description: str) -> list[dict]:
-    """Извлекает ФИО и должности членов экипажа"""
-    pattern = r"([А-ЯЁ][а-яё]+)\s+([А-ЯЁ][а-яё]+)(?:\s+([А-ЯЁ][а-яё]+))?\s*\(([^)]+)\)"
+def extract_crew_with_positions(description: str) -> list[str]:
+    """Извлекает ФИО и должности членов экипажа из сложного текста"""
+    pattern = r"([A-ZА-ЯЁ][A-ZА-ЯЁa-zа-яё-]+)\s+([A-ZА-ЯЁ][A-ZА-ЯЁa-zа-яё-]+)(?:\s+([A-ZА-ЯЁ][A-ZА-ЯЁa-zа-яё-]+))?\s*\((КВС|2П|СБ)\)"
     matches = re.findall(pattern, description)
-
-    return [{
-        'last_name': last,
-        'first_name': first,
-        'middle_name': mid if mid else None,
-        'position': pos
-    } for last, first, mid, pos in matches]
+    return [f"{last} {first} {mid + ' ' if mid else ''}({pos})" for last, first, mid, pos in matches]
 
 
 async def notify_new_event(bot: Bot, chat_id: int, event: Event):
     """Уведомление о новом событии"""
     message = (
-        "<b>New event!</b>\n"
+        "<b>⚠️ New event:</b>\n"
         f"<pre>{event.summary}</pre>\n"
         f"• ↗️ {format_datetime(event.dtstart)}\n"
         f"• ↘️ {format_datetime(event.dtend)}\n\n"
@@ -55,77 +41,56 @@ async def notify_new_event(bot: Bot, chat_id: int, event: Event):
 async def notify_updated_event(bot: Bot, chat_id: int, old_values: dict, new_event: dict):
     """Уведомление об изменении события с детальным сравнением описания"""
     changes = []
-
-    # Вспомогательная функция для сравнения текста
-    def compare_text(old: str, new: str, field_name: str) -> bool:
-        if old.strip() != new.strip():
-            changes.append(
-                f"📝 {field_name}:\n"
-                f"{old[:200] + ('...' if len(old) > 200 else '')}\n→\n"
-                f"{new[:200] + ('...' if len(new) > 200 else '')}"
-            )
-            return True
-        return False
-
     # Проверяем изменения для каждого поля
     for field in ['summary', 'description', 'dtstart', 'dtend']:
         old_val = old_values[field]
         new_val = new_event[field]
 
-        if old_val != new_val:
-            if field in ('dtstart', 'dtend'):
-                changes.append(
-                    f"{field}\n"
-                    f"🕒 was: {format_datetime(old_val)}\n"
-                    f"🕒 now  {format_datetime(new_val)}"
-                )
+        if field == 'summary':
+            if old_val.strip() != new_val.strip():
+                changes.append(f"📝 <b><s>{strip_summary(old_val)}</s></b>\n"
+                               f"  ↳ <b>{strip_summary(new_val)}</b>\n")
             else:
-                compare_text(str(old_val), str(new_val), field)
+                changes.append(f"<b>{strip_summary(old_val)}</b>\n")
 
-    # Специальная обработка для description (сравнение экипажа)
-    old_desc = old_values['description']
-    new_desc = new_event['description']
+        elif field == 'dtstart':
+            if old_val != new_val:
+                changes.append(f"↗️  <s>{format_datetime(old_val)}</s>\n"
+                               f"  ↳ {format_datetime(new_val)}")
+        elif field == 'dtend':
+            if old_val != new_val:
+                changes.append(f"↘️  <s>{format_datetime(old_val)}</s>\n"
+                               f"  ↳ {format_datetime(new_val)}")
+        elif field == 'description':
+            # Специальная обработка для description (сравнение экипажа)
+            old_desc = old_values.get('description', '')
+            new_desc = new_event.get('description', '')
 
-    if old_desc != new_desc:
-        # Извлекаем экипаж из старого и нового описания
-        old_crew = extract_crew_with_positions(old_desc)
-        new_crew = extract_crew_with_positions(new_desc)
+            if old_desc != new_desc:
+                old_crew = extract_crew_with_positions(old_desc)
+                new_crew = extract_crew_with_positions(new_desc)
 
-        # Если состав экипажа изменился
-        if old_crew != new_crew:
-            crew_changes = []
+                # Создаем множества для сравнения
+                old_set = set(old_crew)
+                new_set = set(new_crew)
 
-            # Проверяем изменения по каждому члену экипажа
-            for i, (old_member, new_member) in enumerate(zip_longest(old_crew, new_crew, fillvalue=None)):
-                if old_member is None:
-                    crew_changes.append(f"➕ Added: {format_crew_member(new_member)}")
-                elif new_member is None:
-                    crew_changes.append(f"➖ Removed: {format_crew_member(old_member)}")
-                elif old_member != new_member:
-                    changes_str = []
-                    for key in ['last_name', 'first_name', 'middle_name', 'position']:
-                        if old_member.get(key) != new_member.get(key):
-                            changes_str.append(
-                                f"{key}: {old_member.get(key)}→{new_member.get(key)}"
-                            )
-                    crew_changes.append(
-                        f"✏️ Изменен: {format_crew_member(old_member)}\n" +
-                        "Изменения: " + ", ".join(changes_str)
-                    )
+                # Находим различия
+                removed = old_set - new_set
+                added = new_set - old_set
 
-            changes.append("👥 Изменения в экипаже:\n" + "\n".join(crew_changes))
+                if removed or added:
+                    crew_changes = []
+                    if removed:
+                        crew_changes.append("\n".join(f"• <s>{m}</s>" for m in removed))
+                    if added:
+                        crew_changes.append("\n".join(f"• {m}" for m in added))
 
-        # Проверяем остальные изменения в описании (не экипаж)
-        old_text_without_crew = remove_crew_from_description(old_desc)
-        new_text_without_crew = remove_crew_from_description(new_desc)
-
-        compare_text(old_text_without_crew, new_text_without_crew, "description (детали полета)")
+                    changes.append("👥 Crew change:\n" + "\n".join(crew_changes))
 
     if changes:
         message = (
-                "🔄 <b>Changes in event:</b>\n"
-                f"<pre>{new_event['summary']}</pre>\n" +
-                "\n".join(changes)
+                "🔄 <b>Changes in:</b>\n"
+                + "\n".join(changes)
         )
         await bot.send_message(chat_id, message, parse_mode="HTML")
 

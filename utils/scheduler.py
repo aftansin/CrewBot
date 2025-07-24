@@ -153,7 +153,7 @@ async def check_pilot_calendar(bot: Bot, session: AsyncSession, pilot: Pilot):
 async def start_pilot_calendar_polling(bot, session, scheduler, pilot):
     scheduler.add_job(
         check_pilot_calendar,
-        IntervalTrigger(seconds=random.randint(8000, 10000)),
+        IntervalTrigger(seconds=random.randint(10000, 14000)),
         kwargs={'bot': bot, 'session': session, 'pilot': pilot},
         id=f'{pilot.id}_calendar_polling',
         replace_existing=True

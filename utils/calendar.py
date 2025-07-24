@@ -1,12 +1,10 @@
-import logging
 import re
+import logging
 from collections import Counter
 from pprint import pprint
 from typing import Optional, Tuple
 
 import aiohttp
-import requests
-from fake_useragent import UserAgent
 from icalendar import Calendar
 
 
@@ -29,6 +27,10 @@ async def get_calendar_data(url: str):
                     return Calendar.from_ical(ics_content)
                 logger.error(f"Calendar fetch error: {response.status}")
                 return None
+
+            # with open('utils/test.txt', 'r', encoding='utf-8') as file:
+            #     return Calendar.from_ical(file.read())
+
     except Exception as e:
         logger.error(f"Calendar fetch exception: {e}")
         return None
@@ -52,6 +54,7 @@ async def get_events_from_calendar(calendar_data):
                        'dtstart': dtstart,
                        'dtend': dtend})
     sorted_events_dict = sorted(events_dict, key=lambda x: x['dtstart'])
+    pprint(sorted_events_dict)
     return sorted_events_dict
 
 

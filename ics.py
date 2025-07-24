@@ -27,14 +27,14 @@ def get_calendar_data(url: str):
             print('Календарь пустой')
     else:
         print("Ошибка:", response.status_code, response.text)
-    return
+    return None
 
 
 # Парсинг событий календаря. Возвращает словарь событий или None.
 def get_events_from_calendar(calendar_data):
     # Если календарь пустой, то вернем None
     if not calendar_data:
-        return
+        return None
     events = list()
     for event in calendar_data.walk("VEVENT"):
         event_id = event.get("UID")  # ID
@@ -55,7 +55,7 @@ def get_most_frequent_user(calendar_data) -> Optional[Tuple[str, str, str]]:
     data_summary = list()
     # Если календарь пустой, то вернем None
     if not calendar_data:
-        return
+        return None
     for event in calendar_data.walk("VEVENT"):
         description = event.get("description")  # Описание
         data_summary.append(str(description))

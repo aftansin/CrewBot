@@ -1,14 +1,12 @@
 import re
 from datetime import datetime, timedelta
-from pprint import pprint
 from zoneinfo import ZoneInfo
 
 from aiogram.enums import ContentType
 from aiogram_dialog import DialogManager
 from aiogram_dialog.api.entities import MediaAttachment
 
-from db.db_requests import get_pilot_events, get_pilot_event_by_id
-from utils.notify import extract_crew_with_positions
+from db.db_requests import get_pilot_event_by_id
 
 
 async def pilot_data_getter(dialog_manager: DialogManager, **middleware_data):
