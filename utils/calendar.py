@@ -24,9 +24,11 @@ async def get_calendar_data(url: str):
             async with session.get(url, headers=headers) as response:
                 if response.status == 200:
                     ics_content = await response.text()
+                    print(ics_content)
                     return Calendar.from_ical(ics_content)
-                logger.error(f"Calendar fetch error: {response.status}")
-                return None
+                else:
+                    logger.error(f"Calendar fetch error: {response.status}")
+                    return None
 
             # with open('utils/test.txt', 'r', encoding='utf-8') as file:
             #     return Calendar.from_ical(file.read())
@@ -40,6 +42,7 @@ async def get_calendar_data(url: str):
 async def get_events_from_calendar(calendar_data):
     # Если календарь пустой, то вернем None
     if not calendar_data:
+        logger.warning(f"⚠️ get_events_from_calendar: None")
         return None
     events_dict = list()
     for event in calendar_data.walk("VEVENT"):
@@ -54,7 +57,6 @@ async def get_events_from_calendar(calendar_data):
                        'dtstart': dtstart,
                        'dtend': dtend})
     sorted_events_dict = sorted(events_dict, key=lambda x: x['dtstart'])
-    pprint(sorted_events_dict)
     return sorted_events_dict
 
 

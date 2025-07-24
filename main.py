@@ -65,7 +65,6 @@ async def main() -> None:
         await start_all_calendar_polling(bot, session, scheduler)
     scheduler.start()
 
-    print("Including middlewares")
     dp.update.outer_middleware(IsAdminMiddleware())
     dp.update.outer_middleware(DatabaseMiddleware(sessionmaker))
     dp.update.outer_middleware(TrackAllUsersMiddleware())
@@ -80,4 +79,5 @@ if __name__ == "__main__":
     telegram_handler = NotificationHandler("telegram", defaults=params)
     logger.add(telegram_handler, level="INFO", format="{level} {message}")
     logger.add("debug.log", rotation="1 MB")
+    logger.info("✅ CrewBot started.")
     asyncio.run(main())
