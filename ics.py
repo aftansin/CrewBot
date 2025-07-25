@@ -13,6 +13,7 @@ def get_calendar_data(url: str):
     ua = UserAgent()
     headers = {
         "Accept": "text/calendar",  # Важно для ICS
+        "Accept-Language": "ru-RU",  # Предпочитаем русский язык
         "User-Agent": 'iOS/17.0 (iPhone) CalendarAgent/185'
     }
     response = requests.get(url, headers=headers)

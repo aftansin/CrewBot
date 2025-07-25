@@ -2,7 +2,6 @@ import re
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-import regex
 from aiogram import Bot
 
 from db.models import Event
@@ -15,13 +14,19 @@ def format_datetime(dt: datetime) -> str:
 
 
 def strip_summary(summary: str) -> str:
-    """Форматирует summary для сообщений"""
-    return regex.sub(r'\s*\((?:[^()]++|(?R))*\)\s*', ' ', summary).strip()
+    """Форматирует summary для сообщений, удаляя коды аэропортов и дополнительную информацию в скобках"""
+    # Удаляем все блоки в скобках (включая вложенные)
+    result = re.sub(r'\([^()]*(?:\|.*?)?\)', '', summary)
+    # Удаляем лишние пробелы и одиночные символы (например, оставшиеся |)
+    result = re.sub(r'\s+', ' ', result).strip()
+    # Удаляем пробелы вокруг стрелки
+    result = re.sub(r'\s*→\s*', ' → ', result)
+    return result
 
 
 def extract_crew_with_positions(description: str) -> list[str]:
     """Извлекает ФИО и должности членов экипажа из сложного текста"""
-    pattern = r"([A-ZА-ЯЁ][A-ZА-ЯЁa-zа-яё-]+)\s+([A-ZА-ЯЁ][A-ZА-ЯЁa-zа-яё-]+)(?:\s+([A-ZА-ЯЁ][A-ZА-ЯЁa-zа-яё-]+))?\s*\((КВС|2П|СБ)\)"
+    pattern = r"([А-ЯЁ][А-ЯЁа-яё-]+)\s+([А-ЯЁ][А-ЯЁа-яё-]+)(?:\s+([А-ЯЁ][А-ЯЁа-яё-]+))?\s*\((КВС|2П|СБ)\)"
     matches = re.findall(pattern, description)
     return [f"{last} {first} {mid + ' ' if mid else ''}({pos})" for last, first, mid, pos in matches]
 
@@ -89,7 +94,7 @@ async def notify_updated_event(bot: Bot, chat_id: int, old_values: dict, new_eve
 
     if changes:
         message = (
-                "🔄 <b>Changes in:</b>\n"
+                "🔄 <b>Changes:</b>\n"
                 + "\n".join(changes)
         )
         await bot.send_message(chat_id, message, parse_mode="HTML")

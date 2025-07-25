@@ -16,6 +16,7 @@ async def get_calendar_data(url: str):
     """Асинхронная загрузка календаря с кешированием заголовков"""
     headers = {
         "Accept": "text/calendar",
+        "Accept-Language": "ru-RU",  # Предпочитаем русский язык
         "User-Agent": "iOS/17.0 (iPhone) CalendarAgent/185"
     }
 
@@ -66,7 +67,7 @@ async def get_most_frequent_user(calendar_data) -> Optional[Tuple[str, str, str]
         description = event.get("description")  # Описание
         data_summary.append(str(description))
     # Регулярное выражение для извлечения имен пользователей
-    user_pattern = r'([A-ZА-ЯЁ][a-zа-яё]+)\s+([A-ZА-ЯЁ][a-zа-яё]+)\s+([A-ZА-ЯЁ][a-zа-яё]+)'  # "Фамилия Имя Отчество"
+    user_pattern = r'([А-ЯЁ][А-ЯЁа-яё-]+)\s+([А-ЯЁ][А-ЯЁа-яё-]+)(?:\s+([А-ЯЁ][А-ЯЁа-яё-]+))?'  # "Фамилия Имя Отчество"
     users = []
     # Проход по всем событиям в списке
     for event in data_summary:
