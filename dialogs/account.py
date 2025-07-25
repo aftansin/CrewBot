@@ -84,7 +84,8 @@ def account_info_window():
                on_click=go_events_window),
         Button(text=Const('🔁 Update now'),
                id='update_button',
-               on_click=update_events),
+               on_click=update_events,
+               when='ics_url'),
         Cancel(Const('◀️ Back'), id='exit'),
         getter=pilot_data_getter,
         state=AccountState.account_info
