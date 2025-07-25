@@ -6,5 +6,5 @@ delete_router = Router()
 
 
 @delete_router.message(Command("delete"))
-async def help_func(message: Message) -> None:
+async def delete_func(message: Message) -> None:
     await message.reply('Все ваши данные будут удалены!\nВы уверены?')

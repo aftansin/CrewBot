@@ -55,6 +55,7 @@ async def main() -> None:
     bot_commands = [
         BotCommand(command='start', description='Main menu'),
         BotCommand(command='help', description='Info'),
+        BotCommand(command='delete', description='Delete account'),
     ]
     await bot.set_my_commands(commands=bot_commands)
 

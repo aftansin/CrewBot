@@ -11,6 +11,7 @@ from aiogram_dialog.widgets.text import Const, Format
 from db.db_requests import get_pilot_events
 from states.account import AccountState
 from utils.getters import pilot_data_getter, user_events_getter, event_info_getter
+from utils.scheduler import check_pilot_calendar
 
 
 def paginated_events(on_event_click):
@@ -60,6 +61,13 @@ async def go_events_window(callback: CallbackQuery, button: Button, dialog_manag
     await dialog_manager.find('events_ids').set_page(page)
 
 
+async def update_events(callback: CallbackQuery, button: Button, dialog_manager: DialogManager):
+    bot = dialog_manager.middleware_data.get('bot')
+    pilot = dialog_manager.middleware_data.get('db_pilot')
+    session = dialog_manager.middleware_data.get('session')
+    await check_pilot_calendar(bot, session, pilot)
+
+
 def account_info_window():
     return Window(
         Const(text=' 💳  <b>My Data:</b>'),
@@ -74,6 +82,9 @@ def account_info_window():
         Button(text=Const('🛫 Show events'),
                id='my_flights_button',
                on_click=go_events_window),
+        Button(text=Const('🔁 Update now'),
+               id='update_button',
+               on_click=update_events),
         Cancel(Const('◀️ Back'), id='exit'),
         getter=pilot_data_getter,
         state=AccountState.account_info
