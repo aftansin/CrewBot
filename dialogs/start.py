@@ -43,7 +43,7 @@ async def correct_url_handler(
     await dialog_manager.done()
     await update_ics_link(session, pilot.id, text)
     await check_pilot_calendar(bot, session, pilot)
-    await start_pilot_calendar_polling(bot, session, scheduler, pilot)
+    # await start_pilot_calendar_polling(bot, session, scheduler, pilot)
 
 
 
