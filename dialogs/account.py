@@ -65,8 +65,8 @@ async def update_events(callback: CallbackQuery, button: Button, dialog_manager:
     bot = dialog_manager.middleware_data.get('bot')
     pilot = dialog_manager.middleware_data.get('db_pilot')
     session = dialog_manager.middleware_data.get('session')
-    await check_pilot_calendar(bot, session, pilot)
     await dialog_manager.done()
+    await check_pilot_calendar(bot, session, pilot)
 
 
 def account_info_window():
