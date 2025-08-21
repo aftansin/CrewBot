@@ -81,7 +81,7 @@ async def update_events(callback: CallbackQuery, button: Button, dialog_manager:
 def first_window():
     return Window(
         Const(text='🤖 <b>Main Menu.</b>'),
-        Const(text='<i>To close dialog press exit button.</i>'),
+        Const(text='<i>To close dialog press exit or update button.</i>'),
         Button(text=Const('☕️  By me coffee'),
                id='donate',
                on_click=go_donate_window,
@@ -89,18 +89,19 @@ def first_window():
         Button(text=Const(' 💳  My data'),
                id='account_button',
                on_click=go_account_dialog_button),
-        Button(text=Const('🌐 ics link'),
-                   id='ics_button',
-                   on_click=go_ics_window),
-        Button(text=Const('🔁 Update now'),
+        Button(text=Const('🔁 Update'),
                id='update_button',
                on_click=update_events,
                when='ics_url'),
+        Button(text=Const('🌐 ics link'),
+                   id='ics_button',
+                   on_click=go_ics_window),
         Button(text=Const('🧑‍✈️  Pilots'),
                id='pilots_button',
                on_click=None,
                when=F["middleware_data"]["is_admin"]),
         Cancel(Const('Exit'), id='exit'),
+        getter=pilot_data_getter,
         state=StartState.welcome
     )
 

@@ -61,14 +61,6 @@ async def go_events_window(callback: CallbackQuery, button: Button, dialog_manag
     await dialog_manager.find('events_ids').set_page(page)
 
 
-async def update_events(callback: CallbackQuery, button: Button, dialog_manager: DialogManager):
-    bot = dialog_manager.middleware_data.get('bot')
-    pilot = dialog_manager.middleware_data.get('db_pilot')
-    session = dialog_manager.middleware_data.get('session')
-    await dialog_manager.done()
-    await check_pilot_calendar(bot, session, pilot)
-
-
 def account_info_window():
     return Window(
         Const(text=' 💳  <b>My Data:</b>'),
@@ -83,10 +75,6 @@ def account_info_window():
         Button(text=Const('🛫 Show events'),
                id='my_flights_button',
                on_click=go_events_window),
-        Button(text=Const('🔁 Update now'),
-               id='update_button',
-               on_click=update_events,
-               when='ics_url'),
         Cancel(Const('◀️ Back'), id='exit'),
         getter=pilot_data_getter,
         state=AccountState.account_info
