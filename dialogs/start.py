@@ -70,6 +70,14 @@ async def go_account_dialog_button(callback: CallbackQuery, button: Button, dial
     await dialog_manager.start(state=AccountState.account_info)
 
 
+async def update_events(callback: CallbackQuery, button: Button, dialog_manager: DialogManager):
+    bot = dialog_manager.middleware_data.get('bot')
+    pilot = dialog_manager.middleware_data.get('db_pilot')
+    session = dialog_manager.middleware_data.get('session')
+    await dialog_manager.done()
+    await check_pilot_calendar(bot, session, pilot)
+
+
 def first_window():
     return Window(
         Const(text='🤖 <b>Main Menu.</b>'),
@@ -84,6 +92,10 @@ def first_window():
         Button(text=Const('🌐 ics link'),
                    id='ics_button',
                    on_click=go_ics_window),
+        Button(text=Const('🔁 Update now'),
+               id='update_button',
+               on_click=update_events,
+               when='ics_url'),
         Button(text=Const('🧑‍✈️  Pilots'),
                id='pilots_button',
                on_click=None,
