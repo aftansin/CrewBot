@@ -71,12 +71,12 @@ async def go_account_dialog_button(callback: CallbackQuery, button: Button, dial
 
 
 async def update_events(callback: CallbackQuery, button: Button, dialog_manager: DialogManager):
-    # await dialog_manager.answer_callback()
+    await dialog_manager.answer_callback()
     bot = dialog_manager.middleware_data.get('bot')
     pilot = dialog_manager.middleware_data.get('db_pilot')
     session = dialog_manager.middleware_data.get('session')
     await callback.message.delete()
-    await dialog_manager.done()
+    # await dialog_manager.done()
     await check_pilot_calendar(bot, session, pilot)
 
 
