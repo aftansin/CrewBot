@@ -71,6 +71,7 @@ async def go_account_dialog_button(callback: CallbackQuery, button: Button, dial
 
 
 async def update_events(callback: CallbackQuery, button: Button, dialog_manager: DialogManager):
+    await dialog_manager.answer_callback()
     bot = dialog_manager.middleware_data.get('bot')
     pilot = dialog_manager.middleware_data.get('db_pilot')
     session = dialog_manager.middleware_data.get('session')
