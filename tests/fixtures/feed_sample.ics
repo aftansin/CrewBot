@@ -1,0 +1,85 @@
+BEGIN:VCALENDAR
+X-WR-CALNAME:Aeroflot schedule
+CALSCALE:GREGORIAN
+VERSION:2.0
+BEGIN:VTIMEZONE
+TZID:Europe/Moscow
+X-LIC-LOCATION:Europe/Moscow
+BEGIN:STANDARD
+TZOFFSETFROM:+0300
+TZOFFSETTO:+0300
+TZNAME:MSK
+DTSTART:19700101T030000
+END:STANDARD
+END:VTIMEZONE
+BEGIN:VEVENT
+DTSTAMP:20260912T185908Z
+DTSTART;TZID=Europe/Moscow:20260928T080000
+DTEND;TZID=Europe/Moscow:20260928T154500
+SUMMARY:📋 Reporting\n ПП перед ТРЖ (REF/CH) (2-е полуг.)\,  тр. комплекс \,каб. 312
+UID:1210295
+LOCATION:
+DESCRIPTION:Проводит Testov TT
+TZID:Europe/Moscow
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20260912T185908Z
+DTSTART;TZID=Europe/Moscow:20260915T013000
+DTEND;TZID=Europe/Moscow:20260915T071000
+SUMMARY:SU1562 ✈️ Moscow (SVO | Sheremetyevo (B)) → Irkutsk (IKT | Irkutsk)
+UID:6217323
+LOCATION:Аэропорт Moscow SVO/B 
+DESCRIPTION:[SU1562\, B-737-800H] Moscow (SVO | Sheremetyevo (B)) → Irkutsk (IKT | Irkutsk) \n\nPervyi Ivan Ivanovich (КВС)\;\nVtoroi Petr Petrovich (2П)\;\nTretya Olga Olegovna (СБ)
+TZID:Europe/Moscow
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20260912T185908Z
+DTSTART;TZID=Europe/Moscow:20260916T082000
+DTEND;TZID=Europe/Moscow:20260916T141500
+SUMMARY:SU1563 ✈️ Irkutsk (IKT | Irkutsk) → Moscow (SVO | Sheremetyevo (B))
+UID:6217836
+LOCATION:Аэропорт Irkutsk IKT 
+DESCRIPTION:[SU1563\, B-737-800H] Irkutsk (IKT | Irkutsk) → Moscow (SVO | Sheremetyevo (B)) \n\nPervyi Ivan Ivanovich (КВС)\;\nVtoroi Petr Petrovich (2П)
+TZID:Europe/Moscow
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20260912T185908Z
+DTSTART;TZID=Europe/Moscow:20260921T094500
+DTEND;TZID=Europe/Moscow:20260921T153000
+SUMMARY:SU400 ✈️ Moscow (SVO | Sheremetyevo (C)) → Cairo (CAI | Cairo Intl)
+UID:6220629
+LOCATION:Аэропорт Moscow SVO/C 
+DESCRIPTION:[SU400\, B-737-800H] Moscow (SVO | Sheremetyevo (C)) → Cairo (CAI | Cairo Intl) \n\nPervyi Ivan Ivanovich (КВС)\;\nChetvertyi Nikita Alekseevich (2П)
+TZID:Europe/Moscow
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20260912T185908Z
+DTSTART;TZID=Europe/Moscow:20260901T000000
+DTEND;TZID=Europe/Moscow:20260914T235959
+SUMMARY:🏝 Отпуск\, 14 дней
+UID:2562558
+LOCATION:
+DESCRIPTION:Current Paid Vacation\n
+TZID:Europe/Moscow
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20260912T185908Z
+DTSTART;TZID=Europe/Moscow:20260929T000000
+DTEND;TZID=Europe/Moscow:20261008T235959
+SUMMARY:👨‍🎓 Обучение\, 10 дней
+UID:907252
+LOCATION:
+DESCRIPTION:Первоначальная подготовка инструкторов по специальности
+TZID:Europe/Moscow
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20260912T185908Z
+DTSTART;TZID=Europe/Moscow:20261002T090000
+DTEND;TZID=Europe/Moscow:20261002T130000
+SUMMARY:💉 Медкомиссия ВЛЭК
+UID:3001
+LOCATION:Поликлиника
+DESCRIPTION:
+TZID:Europe/Moscow
+END:VEVENT
+END:VCALENDAR

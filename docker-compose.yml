@@ -1,0 +1,35 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-crewbot}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD не задан}
+      POSTGRES_DB: ${POSTGRES_DB:-crewbot}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # Бот стартует только после того, как база реально готова принимать
+      # соединения, иначе первая же миграция падает на гонке.
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-crewbot} -d ${POSTGRES_DB:-crewbot}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    # Наружу порт не публикуется: база доступна только боту по внутренней сети.
+
+  bot:
+    build: .
+    restart: unless-stopped
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  pgdata:
