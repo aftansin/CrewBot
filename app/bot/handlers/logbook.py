@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
 
 from aiogram import F, Router
 from aiogram.filters import Command, StateFilter
@@ -73,11 +73,10 @@ async def _logbook_text(session: AsyncSession, pilot: Pilot, settings: Settings)
     lines = [
         "\U0001f4d2 <b>Лётная книжка</b>",
         "",
-        f"<b>{start:%m.%Y}</b>: {totals['flights']} рейсов, "
-        f"налёт <b>{fmt_minutes(totals['block'])}</b>",
-        f"КВС {fmt_minutes(totals['pic'])} · "
-        f"2П {fmt_minutes(totals['copilot'])} · "
-        f"ночь {fmt_minutes(totals['night'])}",
+        f"<b>{start:%m.%Y}</b>",
+        f"Налёт: <b>{fmt_minutes(totals['block'])}</b>   "
+        f"ночь: <b>{fmt_minutes(totals['night'])}</b>",
+        f"Рейсов: {totals['flights']}",
     ]
     if pending:
         lines += ["", f"\u26a0\ufe0f Не записано рейсов: <b>{len(pending)}</b>"]
@@ -91,7 +90,11 @@ async def _logbook_text(session: AsyncSession, pilot: Pilot, settings: Settings)
 
 @router.callback_query(lkb.LogCB.filter(F.action == "pending"))
 async def show_pending(
-    call: CallbackQuery, session: AsyncSession, pilot: Pilot, settings: Settings
+    call: CallbackQuery,
+    callback_data: lkb.LogCB,
+    session: AsyncSession,
+    pilot: Pilot,
+    settings: Settings,
 ) -> None:
     tz = pilot_tz(pilot, settings)
     events = await lrepo.pending_flights(session, pilot.id, datetime.now(tz=tz))
@@ -104,10 +107,11 @@ async def show_pending(
         await call.answer()
         return
 
+    page = callback_data.page
     await _render(
         call,
         f"Рейсы, которых нет в книжке: <b>{len(events)}</b>\n\nВыберите, какой записать.",
-        lkb.pending_keyboard(events, tz),
+        lkb.pending_keyboard(events, tz, page),
     )
     await call.answer()
 
@@ -144,16 +148,29 @@ async def take_flight(
 
 
 def _draft_card(draft, tz) -> str:
+    """Плановое время показывается в двух поясах.
+
+    Расписание приходит московским, книжка ведётся в UTC. Показывать
+    только одно из них — верный способ однажды записать не то время,
+    поэтому видны оба, а ввод явно помечен как UTC.
+    """
     route = f"{draft.dep_icao or '????'} \u2192 {draft.arr_icao or '????'}"
     lines = [
         f"\u2708\ufe0f <b>{esc(draft.flight_number or 'рейс')}</b>  {route}",
         f"{draft.flight_date.astimezone(tz):%d.%m.%Y}",
         "",
-        f"По плану: {draft.scheduled_out.astimezone(tz):%H:%M} \u2013 "
-        f"{draft.scheduled_in.astimezone(tz):%H:%M}"
-        if draft.scheduled_out and draft.scheduled_in
-        else "Плановое время неизвестно",
     ]
+    if draft.scheduled_out and draft.scheduled_in:
+        local_out = draft.scheduled_out.astimezone(tz)
+        local_in = draft.scheduled_in.astimezone(tz)
+        utc_out = draft.scheduled_out.astimezone(UTC)
+        utc_in = draft.scheduled_in.astimezone(UTC)
+        lines += [
+            f"По плану <b>{local_out:%H:%M}\u2013{local_in:%H:%M} МСК</b>",
+            f"            {utc_out:%H:%M}\u2013{utc_in:%H:%M} UTC",
+        ]
+    else:
+        lines.append("Плановое время неизвестно")
     if draft.aircraft_type:
         lines.append(f"Тип: {esc(draft.aircraft_type)}")
     if draft.crew:
@@ -163,8 +180,8 @@ def _draft_card(draft, tz) -> str:
 
     lines += [
         "",
-        "<b>Пришлите фактические времена</b> запуска и выключения, "
-        "в UTC, одной строкой:",
+        "<b>Пришлите фактические времена</b> запуска и выключения "
+        "\u2014 <u>в UTC</u>, одной строкой:",
         "<code>0952 1537</code>",
     ]
     return "\n".join(lines)
@@ -313,22 +330,33 @@ async def choose_tail(
 
 @router.callback_query(lkb.LogCB.filter(F.action == "recent"))
 async def show_recent(
-    call: CallbackQuery, session: AsyncSession, pilot: Pilot, settings: Settings
+    call: CallbackQuery,
+    callback_data: lkb.LogCB,
+    session: AsyncSession,
+    pilot: Pilot,
+    settings: Settings,
 ) -> None:
-    flights = await lrepo.recent_flights(session, pilot.id, limit=12)
-    if not flights:
+    page = callback_data.page
+    total = await lrepo.count_flights(session, pilot.id)
+    if not total:
         await _render(call, "В книжке пока пусто.", lkb.back_to_logbook())
         await call.answer()
         return
 
-    lines = ["\U0001f4d6 <b>Последние записи</b>", ""]
+    pages = max(1, (total + lkb.PAGE_SIZE - 1) // lkb.PAGE_SIZE)
+    page = max(0, min(page, pages - 1))
+    flights = await lrepo.recent_flights(
+        session, pilot.id, limit=lkb.PAGE_SIZE, offset=page * lkb.PAGE_SIZE
+    )
+
+    lines = [f"\U0001f4d6 <b>Записи</b>  ({total} всего)", ""]
     for flight in flights:
         tail = flight.aircraft.display if flight.aircraft else "\u2014"
+        night = f"  \U0001f319 {fmt_minutes(flight.night_minutes)}" if flight.night_minutes else ""
         lines.append(
-            f"{flight.flight_date:%d.%m} "
-            f"{esc(flight.flight_number or ''):>6} "
+            f"{flight.flight_date:%d.%m.%y} "
             f"{flight.dep_icao}\u2192{flight.arr_icao} "
-            f"{fmt_minutes(flight.block_minutes)} {esc(tail)}"
+            f"<b>{fmt_minutes(flight.block_minutes)}</b>{night}  {esc(tail)}"
         )
-    await _render(call, "\n".join(lines), lkb.back_to_logbook())
+    await _render(call, "\n".join(lines), lkb.recent_keyboard(page, pages))
     await call.answer()

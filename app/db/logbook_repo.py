@@ -271,13 +271,19 @@ async def month_totals(session: AsyncSession, pilot_id: int, start: date, end: d
     }
 
 
+async def count_flights(session: AsyncSession, pilot_id: int) -> int:
+    stmt = select(func.count(Flight.id)).where(Flight.pilot_id == pilot_id)
+    return int((await session.execute(stmt)).scalar_one())
+
+
 async def recent_flights(
-    session: AsyncSession, pilot_id: int, limit: int = 10
+    session: AsyncSession, pilot_id: int, limit: int = 10, offset: int = 0
 ) -> list[Flight]:
     stmt = (
         select(Flight)
         .where(Flight.pilot_id == pilot_id)
         .order_by(Flight.flight_date.desc(), Flight.out_utc.desc())
         .limit(limit)
+        .offset(offset)
     )
     return list((await session.execute(stmt)).scalars().all())

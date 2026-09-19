@@ -9,10 +9,13 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from app.bot.keyboards import MenuCB
 from app.db.models import Aircraft, Event
 
+PAGE_SIZE = 8
+
 
 class LogCB(CallbackData, prefix="log"):
     action: str          # menu | pending | take | recent
     uid: str = ""
+    page: int = 0
 
 
 class TailCB(CallbackData, prefix="tail"):
@@ -34,9 +37,26 @@ def back_to_logbook(text: str = "\u25c0\ufe0f Книжка") -> InlineKeyboardMa
     return builder.as_markup()
 
 
-def pending_keyboard(events: list[Event], tz, limit: int = 10) -> InlineKeyboardMarkup:
+def _pager(builder, action: str, page: int, pages: int) -> None:
+    if pages <= 1:
+        return
+    row = []
+    if page > 0:
+        row.append(InlineKeyboardButton(
+            text="\u25c0\ufe0f", callback_data=LogCB(action=action, page=page - 1).pack()))
+    row.append(InlineKeyboardButton(
+        text=f"{page + 1}/{pages}", callback_data=LogCB(action="noop").pack()))
+    if page < pages - 1:
+        row.append(InlineKeyboardButton(
+            text="\u25b6\ufe0f", callback_data=LogCB(action=action, page=page + 1).pack()))
+    builder.row(*row)
+
+
+def pending_keyboard(events: list[Event], tz, page: int = 0) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    for event in events[:limit]:
+    pages = max(1, (len(events) + PAGE_SIZE - 1) // PAGE_SIZE)
+    page = max(0, min(page, pages - 1))
+    for event in events[page * PAGE_SIZE : (page + 1) * PAGE_SIZE]:
         local = event.dtstart.astimezone(tz)
         route = f"{event.dep_code or '???'}\u2192{event.arr_code or '???'}"
         label = f"{local:%d.%m} {event.flight_no or ''} {route}"
@@ -45,6 +65,18 @@ def pending_keyboard(events: list[Event], tz, limit: int = 10) -> InlineKeyboard
                 text=label[:64], callback_data=LogCB(action="take", uid=event.uid).pack()
             )
         )
+    _pager(builder, "pending", page, pages)
+    builder.row(
+        InlineKeyboardButton(
+            text="\u25c0\ufe0f Книжка", callback_data=LogCB(action="menu").pack()
+        )
+    )
+    return builder.as_markup()
+
+
+def recent_keyboard(page: int, pages: int) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    _pager(builder, "recent", page, pages)
     builder.row(
         InlineKeyboardButton(
             text="\u25c0\ufe0f Книжка", callback_data=LogCB(action="menu").pack()
