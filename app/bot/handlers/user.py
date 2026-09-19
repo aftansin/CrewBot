@@ -214,6 +214,17 @@ async def back_to_main(call: CallbackQuery, pilot: Pilot, is_admin: bool, state:
     await call.answer()
 
 
+@router.callback_query(kb.MenuCB.filter(F.action == "logbook"))
+async def open_logbook(call: CallbackQuery) -> None:
+    """Кнопка из главного меню. Экраны живут в роутере книжки."""
+    from app.bot import logbook_keyboards as lkb
+    from app.bot.handlers.logbook import show_logbook  # noqa: F401
+
+    await call.answer()
+    if call.message is not None:
+        await call.message.answer("Открываю книжку\u2026", reply_markup=lkb.logbook_menu())
+
+
 @router.callback_query(kb.MenuCB.filter(F.action == "noop"))
 async def noop(call: CallbackQuery) -> None:
     await call.answer()

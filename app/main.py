@@ -14,6 +14,7 @@ from aiogram.types import BotCommand
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from app.bot.handlers import admin as admin_handlers
+from app.bot.handlers import logbook as logbook_handlers
 from app.bot.handlers import user as user_handlers
 from app.bot.middlewares import DatabaseMiddleware, PilotMiddleware
 from app.config import get_settings
@@ -28,6 +29,7 @@ BOT_COMMANDS = [
     BotCommand(command="start", description="Меню"),
     BotCommand(command="plan", description="Мой план"),
     BotCommand(command="stats", description="Налёт за месяц"),
+    BotCommand(command="logbook", description="Лётная книжка"),
     BotCommand(command="settings", description="Настройки"),
     BotCommand(command="help", description="Справка"),
     BotCommand(command="delete", description="Удалить мои данные"),
@@ -85,6 +87,7 @@ async def run() -> None:
     dp.update.outer_middleware(PilotMiddleware(settings))
 
     dp.include_router(admin_handlers.router)
+    dp.include_router(logbook_handlers.router)
     dp.include_router(user_handlers.router)
 
     await bot.set_my_commands(BOT_COMMANDS)

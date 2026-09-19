@@ -53,8 +53,9 @@ def main_menu(has_link: bool, is_admin: bool) -> InlineKeyboardMarkup:
         builder.button(text="\U0001f501 Обновить план", callback_data=MenuCB(action="refresh"))
         builder.button(text="\U0001f4c5 Мой план", callback_data=PlanCB(page=0, scope="upcoming"))
         builder.button(text="\U0001f4ca Налёт", callback_data=MenuCB(action="stats"))
+        builder.button(text="\U0001f4d2 Книжка", callback_data=MenuCB(action="logbook"))
         builder.button(text="\u2699\ufe0f Настройки", callback_data=MenuCB(action="settings"))
-        builder.adjust(1, 2, 1)
+        builder.adjust(1, 2, 2)
     else:
         builder.button(text="\U0001f517 Привязать календарь", callback_data=MenuCB(action="link"))
         builder.button(text="\u2139\ufe0f Помощь", callback_data=MenuCB(action="help"))
