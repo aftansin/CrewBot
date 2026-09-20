@@ -40,6 +40,16 @@ FUNCTION_SHORT = {
 }
 
 
+def short_name(full: str | None) -> str:
+    """Фамилия и имя без отчества.
+
+    В зарубежных лётных книжках отчества нет, и в отчёте оно только
+    засоряет шапку.
+    """
+    parts = (latin1(full) or "").split()
+    return " ".join(parts[:2])
+
+
 def latin1(text: str | None) -> str:
     """Приводит к тому, что умеют встроенные шрифты.
 
@@ -49,6 +59,14 @@ def latin1(text: str | None) -> str:
     if not text:
         return ""
     value = to_display_latin(str(text)) or ""
+    # Типографские символы тоже вне latin-1: длинное тире в подписи
+    # роняло генерацию не хуже кириллицы.
+    for source, target in (
+        ("\u2014", "-"), ("\u2013", "-"), ("\u2212", "-"),
+        ("\u201c", '"'), ("\u201d", '"'), ("\u00ab", '"'), ("\u00bb", '"'),
+        ("\u2018", "'"), ("\u2019", "'"), ("\u2026", "..."), ("\u00a0", " "),
+    ):
+        value = value.replace(source, target)
     return value.encode("latin-1", errors="replace").decode("latin-1")
 
 
@@ -82,8 +100,13 @@ class Totals:
 class LogbookPDF(FPDF):
     def __init__(self, owner: str, subtitle: str, landscape: bool = False) -> None:
         super().__init__(orientation="L" if landscape else "P", unit="mm", format="A4")
-        self.owner = latin1(owner)
+        self.owner = short_name(owner)
         self.subtitle = latin1(subtitle)
+        # Раздел (обычно год) показывается в шапке каждой страницы. Без
+        # этого таблица, переехавшая на следующий лист, выглядит оторванной
+        # от своего заголовка.
+        self.section_label = ""
+        self.zebra = False
         self.set_auto_page_break(auto=True, margin=15)
         self.set_title(f"Flight Log - {self.owner}")
 
@@ -93,7 +116,10 @@ class LogbookPDF(FPDF):
         self.set_font("Helvetica", "", 10)
         self.cell(0, 5, self.owner, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         self.set_font("Helvetica", "I", 9)
-        self.cell(0, 5, self.subtitle, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        caption = self.subtitle
+        if self.section_label:
+            caption = f"{caption}   |   {self.section_label}"
+        self.cell(0, 5, latin1(caption), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         self.set_draw_color(160, 160, 160)
         self.line(self.l_margin, self.get_y() + 1, self.w - self.r_margin, self.get_y() + 1)
         self.ln(4)
@@ -112,17 +138,26 @@ class LogbookPDF(FPDF):
 
     def table_header(self, columns: list[tuple[str, int]]) -> None:
         self.set_font("Helvetica", "B", 8)
-        self.set_fill_color(235, 235, 235)
+        self.set_fill_color(228, 230, 233)
         for title, width in columns:
-            self.cell(width, 6, title, border=0, align=Align.C, fill=True)
+            self.cell(width, 6.5, latin1(title), border=0, align=Align.C, fill=True)
         self.ln()
         self.set_font("Helvetica", "", 8)
+        self.zebra = False
 
     def row(self, values: list[tuple[str, int, str]], bold: bool = False) -> None:
         self.set_font("Helvetica", "B" if bold else "", 8)
+        # Чередование фона: на плотной таблице глаз иначе теряет строку.
+        fill = not bold and self.zebra
+        if fill:
+            self.set_fill_color(246, 247, 248)
         for text, width, align in values:
-            self.cell(width, 5, text, border="T" if bold else 0, align=align)
+            self.cell(
+                width, 5.2, latin1(text), border="T" if bold else 0,
+                align=align, fill=fill,
+            )
         self.ln()
+        self.zebra = not self.zebra
 
     def section(self, title: str) -> None:
         self.ln(2)
@@ -143,9 +178,9 @@ def _totals_block(pdf: LogbookPDF, title: str, totals: Totals) -> None:
         ("Landings (day / night)", f"{totals.ldg_day} / {totals.ldg_night}"),
     ]
     for label, value in rows:
-        pdf.cell(60, 5, label)
+        pdf.cell(60, 5, latin1(label))
         pdf.set_font("Helvetica", "B", 9)
-        pdf.cell(30, 5, value, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.cell(30, 5, latin1(value), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         pdf.set_font("Helvetica", "", 9)
 
 
@@ -153,13 +188,12 @@ def _totals_block(pdf: LogbookPDF, title: str, totals: Totals) -> None:
 # Формы отчётов
 # --------------------------------------------------------------------------
 
-# Ширины подобраны под альбомный A4: сумма 277 мм — вся полезная ширина
-# листа за вычетом полей. Заметка забирает остаток, потому что место
-# всё равно пустовало.
+# Ширины под альбомный A4: сумма 277 мм — вся полезная ширина листа
+# за вычетом полей.
 FLIGHT_COLUMNS = [
-    ("DATE", 22), ("FLT", 18), ("FROM", 16), ("TO", 16), ("AIRCRAFT", 26),
-    ("OUT", 15), ("IN", 15), ("TOTAL", 17), ("PIC", 16), ("SIC", 16),
-    ("NIGHT", 16), ("FUNC", 14), ("REMARKS", 70),
+    ("DATE", 26), ("FLIGHT", 24), ("FROM", 22), ("TO", 22), ("AIRCRAFT", 34),
+    ("OUT", 20), ("IN", 20), ("TOTAL", 25), ("PIC", 24), ("SIC", 24),
+    ("NIGHT", 24), ("FUNC", 12),
 ]
 
 
@@ -168,19 +202,18 @@ def _flight_row(pdf: LogbookPDF, flight: Flight) -> None:
     pic = hhmm(flight.block_minutes) if flight.function in PIC_FUNCTIONS else ""
     sic = hhmm(flight.block_minutes) if flight.function in COPILOT_FUNCTIONS else ""
     pdf.row([
-        (flight.flight_date.strftime("%d %b %y"), 22, Align.L),
-        (latin1(flight.flight_number), 18, Align.L),
-        (flight.dep_icao or "", 16, Align.C),
-        (flight.arr_icao or "", 16, Align.C),
-        (latin1(tail), 26, Align.L),
-        (flight.out_utc.strftime("%H:%M") if flight.out_utc else "", 15, Align.C),
-        (flight.in_utc.strftime("%H:%M") if flight.in_utc else "", 15, Align.C),
-        (hhmm(flight.block_minutes), 17, Align.R),
-        (pic, 16, Align.R),
-        (sic, 16, Align.R),
-        (hhmm(flight.night_minutes) if flight.night_minutes else "", 16, Align.R),
-        (FUNCTION_SHORT.get(flight.function, ""), 14, Align.C),
-        (latin1(flight.remarks)[:42], 70, Align.L),
+        (flight.flight_date.strftime("%d %b %y"), 26, Align.L),
+        (latin1(flight.flight_number), 24, Align.L),
+        (flight.dep_icao or "", 22, Align.C),
+        (flight.arr_icao or "", 22, Align.C),
+        (latin1(tail), 34, Align.L),
+        (flight.out_utc.strftime("%H:%M") if flight.out_utc else "", 20, Align.C),
+        (flight.in_utc.strftime("%H:%M") if flight.in_utc else "", 20, Align.C),
+        (hhmm(flight.block_minutes), 25, Align.R),
+        (pic, 24, Align.R),
+        (sic, 24, Align.R),
+        (hhmm(flight.night_minutes) if flight.night_minutes else "", 24, Align.R),
+        (FUNCTION_SHORT.get(flight.function, ""), 12, Align.C),
     ])
 
 
@@ -198,12 +231,11 @@ def _detail_pages(pdf: LogbookPDF, flights: list[Flight]) -> Totals:
     pdf.row(
         [
             ("TOTAL", total_width, Align.R),
-            (hhmm(grand.block), 17, Align.R),
-            (hhmm(grand.pic), 16, Align.R),
-            (hhmm(grand.sic), 16, Align.R),
-            (hhmm(grand.night), 16, Align.R),
-            ("", 14, Align.C),
-            ("", 70, Align.L),
+            (hhmm(grand.block), 25, Align.R),
+            (hhmm(grand.pic), 24, Align.R),
+            (hhmm(grand.sic), 24, Align.R),
+            (hhmm(grand.night), 24, Align.R),
+            ("", 12, Align.C),
         ],
         bold=True,
     )
@@ -301,20 +333,22 @@ def build_full(owner: str, flights: list[Flight]) -> bytes:
     """Вся книжка: каждый рейс строкой, с разбивкой по годам."""
     pdf = LogbookPDF(owner, "Complete logbook", landscape=True)
     pdf.alias_nb_pages()
-    pdf.add_page()
 
     grand = Totals()
     by_year: dict[int, list[Flight]] = defaultdict(list)
     for flight in flights:
         by_year[flight.flight_date.year].append(flight)
 
+    # Каждый год с новой страницы: иначе таблица начинается внизу одного
+    # листа и продолжается на следующем без заголовка.
     for year in sorted(by_year):
-        pdf.section(str(year))
+        pdf.section_label = str(year)
+        pdf.add_page()
         totals = _detail_pages(pdf, by_year[year])
         for name in Totals.__slots__:
             setattr(grand, name, getattr(grand, name) + getattr(totals, name))
-        pdf.ln(2)
 
+    pdf.section_label = ""
     pdf.add_page()
     _totals_block(pdf, "Grand total", grand)
     return bytes(pdf.output())
