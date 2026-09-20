@@ -22,7 +22,7 @@ from app.config import Settings
 from app.db import repo
 from app.db.models import EventKind, SyncStatus
 from app.icalendar_feed.parse import month_bounds
-from app.sync.render import KIND_ICON, esc, fmt_minutes
+from app.sync.render import KIND_ICON, KIND_LABEL, esc, fmt_minutes
 from app.sync.service import SyncService
 
 router = Router(name="admin")
@@ -103,6 +103,30 @@ async def _build_list(session: AsyncSession, settings: Settings, page: int):
     return text, kb.admin_list_keyboard(chunk, page, total_pages)
 
 
+def _upcoming_line(event, tz) -> str:
+    """Одно событие — одна строка.
+
+    Для рейса: дата, время, номер и маршрут кодами IATA. Регистрации
+    борта в ленте расписания нет, приходит только тип, поэтому показать
+    её здесь нечем — она появляется, когда рейс попадает в книжку.
+    Для прочих событий первая строка описания, обрезанная по ширине.
+    """
+    icon = KIND_ICON.get(event.kind, "")
+    local = event.dtstart.astimezone(tz)
+    stamp = f"{local:%d.%m %H:%M}"
+
+    if event.kind is EventKind.FLIGHT:
+        route = ""
+        if event.dep_code and event.arr_code:
+            route = f"{event.dep_code}\u2192{event.arr_code}"
+        parts = [p for p in (event.flight_no, route) if p]
+        return f"{icon} {stamp}  {esc(' '.join(parts))}" if parts else f"{icon} {stamp}"
+
+    first_line = next((x for x in event.summary.splitlines() if x.strip()), "")
+    title = " ".join(first_line.split())[:32]
+    return f"{icon} {stamp}  {esc(title)}"
+
+
 async def _build_pilot_card(
     session: AsyncSession, settings: Settings, pilot_id: int, page: int
 ):
@@ -148,19 +172,16 @@ async def _build_pilot_card(
         for event in events:
             by_kind[event.kind] = by_kind.get(event.kind, 0) + 1
         lines.append("")
-        lines.append(f"<b>План на {start:%m.%Y}</b> — {len(events)} событий")
+        lines.append(f"<b>План на {start:%m.%Y}</b> \u2014 {len(events)} событий")
         for kind, count in sorted(by_kind.items(), key=lambda kv: -kv[1]):
-            lines.append(f"{KIND_ICON.get(kind, '')} {kind.value}: {count}")
+            label = KIND_LABEL.get(kind, kind.value)
+            lines.append(f"{KIND_ICON.get(kind, '')} {label}: {count}")
 
-        upcoming = await repo.get_upcoming_events(session, pilot.id, now, limit=5)
+        upcoming = await repo.get_upcoming_events(session, pilot.id, now, limit=6)
         if upcoming:
             lines.append("")
             lines.append("<b>Ближайшее</b>")
-            for event in upcoming:
-                icon = KIND_ICON.get(event.kind, "")
-                local = event.dtstart.astimezone(tz)
-                title = " ".join(event.summary.split())[:38]
-                lines.append(f"{icon} {local:%d.%m %H:%M} {esc(title)}")
+            lines.extend(_upcoming_line(event, tz) for event in upcoming)
 
     return "\n".join(lines), kb.admin_pilot_keyboard(pilot.id, page)
 

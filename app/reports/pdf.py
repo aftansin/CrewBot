@@ -25,6 +25,22 @@ from app.logbook.translit import to_display_latin
 MONTHS = ("", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
           "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 
+# Названия компаний на латинице. Транслитерация даёт "Pereuchivanie, Ssha",
+# что в отчёте для зарубежной авиакомпании выглядит дико.
+EMPLOYER_EN = {
+    "Аэрофлот": "Aeroflot",
+    "Трансаэро": "Transaero",
+    "Нордвинд": "Nordwind",
+    "Переучивание, США": "Flight training, USA",
+    "Переучивание, Сша": "Flight training, USA",
+}
+
+
+def employer_en(name: str | None) -> str:
+    if not name:
+        return "Unspecified"
+    return EMPLOYER_EN.get(name.strip(), latin1(name))
+
 PIC_FUNCTIONS = {Function.PIC, Function.PICUS, Function.FI, Function.FE}
 COPILOT_FUNCTIONS = {Function.COPILOT, Function.CRUISE_RELIEF}
 
@@ -136,11 +152,27 @@ class LogbookPDF(FPDF):
 
     # -- вспомогательное ---------------------------------------------------
 
-    def table_header(self, columns: list[tuple[str, int]]) -> None:
+    def table_header(
+        self, columns: list[tuple[str, int]], aligns: list[str] | None = None
+    ) -> None:
+        """Заголовок повторяет выравнивание содержимого колонки.
+
+        Иначе подпись стоит по центру, а числа под ней жмутся вправо —
+        глаз читает это как сбитую вёрстку.
+        """
         self.set_font("Helvetica", "B", 8)
         self.set_fill_color(228, 230, 233)
-        for title, width in columns:
-            self.cell(width, 6.5, latin1(title), border=0, align=Align.C, fill=True)
+        for index, (title, width) in enumerate(columns):
+            align = aligns[index] if aligns and index < len(aligns) else Align.C
+            padding = 1.5 if align != Align.C else 0
+            if align == Align.R:
+                self.cell(width - padding, 6.5, latin1(title), align=align, fill=True)
+                self.cell(padding, 6.5, "", fill=True)
+            elif align == Align.L:
+                self.cell(padding, 6.5, "", fill=True)
+                self.cell(width - padding, 6.5, latin1(title), align=align, fill=True)
+            else:
+                self.cell(width, 6.5, latin1(title), align=align, fill=True)
         self.ln()
         self.set_font("Helvetica", "", 8)
         self.zebra = False
@@ -152,10 +184,18 @@ class LogbookPDF(FPDF):
         if fill:
             self.set_fill_color(246, 247, 248)
         for text, width, align in values:
-            self.cell(
-                width, 5.2, latin1(text), border="T" if bold else 0,
-                align=align, fill=fill,
-            )
+            padding = 1.5 if align != Align.C else 0
+            if align == Align.R:
+                self.cell(width - padding, 4.9, latin1(text),
+                          border="T" if bold else 0, align=align, fill=fill)
+                self.cell(padding, 4.9, "", border="T" if bold else 0, fill=fill)
+            elif align == Align.L:
+                self.cell(padding, 4.9, "", border="T" if bold else 0, fill=fill)
+                self.cell(width - padding, 4.9, latin1(text),
+                          border="T" if bold else 0, align=align, fill=fill)
+            else:
+                self.cell(width, 4.9, latin1(text),
+                          border="T" if bold else 0, align=align, fill=fill)
         self.ln()
         self.zebra = not self.zebra
 
@@ -192,45 +232,60 @@ def _totals_block(pdf: LogbookPDF, title: str, totals: Totals) -> None:
 # за вычетом полей.
 # PIC и SIC отдельными колонками не нужны: функция в последнем столбце
 # говорит то же самое, а итоги по ним есть в сводном блоке под таблицей.
+# Таблица уже полной ширины листа и стоит по центру: растянутая на 277 мм
+# она смотрится пустой, а колонки разъезжаются друг от друга.
 FLIGHT_COLUMNS = [
-    ("DATE", 30), ("FLIGHT", 28), ("FROM", 26), ("TO", 26), ("AIRCRAFT", 40),
-    ("OUT", 24), ("IN", 24), ("TOTAL", 30), ("NIGHT", 28), ("FUNCTION", 21),
+    ("DATE", 26), ("FLIGHT", 24), ("FROM", 22), ("TO", 22), ("AIRCRAFT", 32),
+    ("OUT", 20), ("IN", 20), ("TOTAL", 24), ("NIGHT", 24), ("FUNCTION", 22),
 ]
+FLIGHT_ALIGNS = [Align.L, Align.L, Align.C, Align.C, Align.L,
+                 Align.C, Align.C, Align.R, Align.R, Align.C]
+# Отступ слева, чтобы более узкая таблица встала по центру листа.
+FLIGHT_INDENT = 14.0
 
 
 def _flight_row(pdf: LogbookPDF, flight: Flight) -> None:
     tail = flight.aircraft.display if flight.aircraft else ""
-    pdf.row([
-        (flight.flight_date.strftime("%d %b %y"), 30, Align.L),
-        (latin1(flight.flight_number), 28, Align.L),
-        (flight.dep_icao or "", 26, Align.C),
-        (flight.arr_icao or "", 26, Align.C),
-        (latin1(tail), 40, Align.L),
-        (flight.out_utc.strftime("%H:%M") if flight.out_utc else "", 24, Align.C),
-        (flight.in_utc.strftime("%H:%M") if flight.in_utc else "", 24, Align.C),
-        (hhmm(flight.block_minutes), 30, Align.R),
-        (hhmm(flight.night_minutes) if flight.night_minutes else "", 28, Align.R),
-        (FUNCTION_SHORT.get(flight.function, ""), 21, Align.C),
-    ])
+    widths = [w for _, w in FLIGHT_COLUMNS]
+    values = [
+        flight.flight_date.strftime("%d %b %y"),
+        latin1(flight.flight_number),
+        flight.dep_icao or "",
+        flight.arr_icao or "",
+        latin1(tail),
+        flight.out_utc.strftime("%H:%M") if flight.out_utc else "",
+        flight.in_utc.strftime("%H:%M") if flight.in_utc else "",
+        hhmm(flight.block_minutes),
+        hhmm(flight.night_minutes) if flight.night_minutes else "",
+        FUNCTION_SHORT.get(flight.function, ""),
+    ]
+    pdf.set_x(pdf.l_margin + FLIGHT_INDENT)
+    pdf.row([(v, widths[i], FLIGHT_ALIGNS[i]) for i, v in enumerate(values)])
+
+
+def _flight_table_header(pdf: LogbookPDF) -> None:
+    pdf.set_x(pdf.l_margin + FLIGHT_INDENT)
+    pdf.table_header(FLIGHT_COLUMNS, FLIGHT_ALIGNS)
 
 
 def _detail_pages(pdf: LogbookPDF, flights: list[Flight]) -> Totals:
     grand = Totals()
-    pdf.table_header(FLIGHT_COLUMNS)
+    _flight_table_header(pdf)
     for flight in sorted(flights, key=lambda f: (f.flight_date, f.out_utc or datetime.min)):
-        if pdf.get_y() > pdf.h - 30:
+        if pdf.get_y() > pdf.h - 26:
             pdf.add_page()
-            pdf.table_header(FLIGHT_COLUMNS)
+            _flight_table_header(pdf)
         _flight_row(pdf, flight)
         grand.add(flight)
 
-    total_width = sum(w for _, w in FLIGHT_COLUMNS[:7])
+    widths = [w for _, w in FLIGHT_COLUMNS]
+    pdf.set_x(pdf.l_margin + FLIGHT_INDENT)
     pdf.row(
         [
-            ("TOTAL", total_width, Align.R),
-            (hhmm(grand.block), 30, Align.R),
-            (hhmm(grand.night), 28, Align.R),
-            ("", 21, Align.C),
+            ("TOTAL", sum(widths[:7]), Align.R),
+            (hhmm(grand.block), widths[7], Align.R),
+            (hhmm(grand.night), widths[8], Align.R),
+            ("", widths[9], Align.C),
         ],
         bold=True,
     )
@@ -246,7 +301,7 @@ SUMMARY_COLUMNS = [("", 58), ("FLIGHTS", 24), ("TOTAL", 26), ("PIC", 26),
 def _summary_table(pdf: LogbookPDF, first_header: str, rows: list[tuple[str, Totals]],
                    total: Totals | None = None) -> None:
     columns = [(first_header, SUMMARY_COLUMNS[0][1])] + SUMMARY_COLUMNS[1:]
-    pdf.table_header(columns)
+    pdf.table_header(columns, [Align.L] + [Align.R] * (len(columns) - 1))
     widths = [w for _, w in columns]
     for label, totals in rows:
         pdf.row([
@@ -287,7 +342,7 @@ def build_summary(owner: str, flights: list[Flight]) -> bytes:
         by_type[latin1(kind) or "Unspecified"].add(flight)
 
         employer = flight.employer
-        name = latin1(employer.name) if employer else "Unspecified"
+        name = employer_en(employer.name) if employer else "Unspecified"
         # Один работодатель может встречаться дважды — уход и возвращение.
         # Разделяем такие периоды по дате начала.
         key = f"{name}|{employer.started_on:%Y}" if employer else name
@@ -320,25 +375,33 @@ def build_summary(owner: str, flights: list[Flight]) -> bytes:
     return bytes(pdf.output())
 
 
+# Книжный лист: полезная ширина 190 мм.
 YEAR_COLUMNS = [
-    ("MONTH", 37), ("FLIGHTS", 30), ("TOTAL", 36), ("PIC", 36),
-    ("SIC", 36), ("NIGHT", 36), ("DAY LDG", 32), ("NIGHT LDG", 34),
+    ("MONTH", 28), ("FLIGHTS", 22), ("TOTAL", 26), ("PIC", 26),
+    ("SIC", 26), ("NIGHT", 26), ("DAY LDG", 18), ("NIGHT LDG", 18),
 ]
+YEAR_ALIGNS = [Align.L] + [Align.R] * 7
 
 
 def build_year(owner: str, flights: list[Flight], year: int) -> bytes:
     """Один год: месяцы таблицей плюс итог. Альбомный лист, широкая таблица."""
-    pdf = LogbookPDF(owner, f"Year {year}", landscape=True)
+    pdf = LogbookPDF(owner, f"Year {year}")
     pdf.alias_nb_pages()
     pdf.add_page()
 
     by_month: dict[int, Totals] = defaultdict(Totals)
+    by_type: dict[str, Totals] = defaultdict(Totals)
+    by_route: dict[str, Totals] = defaultdict(Totals)
     grand = Totals()
     for flight in flights:
         by_month[flight.flight_date.month].add(flight)
         grand.add(flight)
+        kind = flight.aircraft.type_name if flight.aircraft else None
+        by_type[latin1(kind) or "Unspecified"].add(flight)
+        if flight.dep_icao and flight.arr_icao:
+            by_route[f"{flight.dep_icao} - {flight.arr_icao}"].add(flight)
 
-    pdf.table_header(YEAR_COLUMNS)
+    pdf.table_header(YEAR_COLUMNS, YEAR_ALIGNS)
     widths = [w for _, w in YEAR_COLUMNS]
     for month in range(1, 13):
         totals = by_month.get(month)
@@ -368,6 +431,19 @@ def build_year(owner: str, flights: list[Flight], year: int) -> bytes:
         ],
         bold=True,
     )
+
+    # Год в книжной ориентации оставляет полстраницы пустыми — заполняем
+    # тем, что реально интересно посмотреть за год.
+    pdf.section("By aircraft type")
+    _summary_table(
+        pdf, "TYPE",
+        [(k, by_type[k]) for k in sorted(by_type, key=lambda k: -by_type[k].block)],
+    )
+
+    top_routes = sorted(by_route, key=lambda k: -by_route[k].flights)[:12]
+    if top_routes:
+        pdf.section("Most flown routes")
+        _summary_table(pdf, "ROUTE", [(k, by_route[k]) for k in top_routes])
 
     return bytes(pdf.output())
 

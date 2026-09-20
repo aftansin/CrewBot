@@ -1102,6 +1102,9 @@ async def save_manual_flight(
 # Отчёты в PDF
 # --------------------------------------------------------------------------
 
+MONTHS_RU = ("", "Январь", "Февраль", "Март", "Апрель", "Май", "Июнь",
+             "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь")
+
 REPORT_HINTS = {
     "summary": "Итоги по годам и типам ВС на одной странице. Для резюме.",
     "year": "Месяцы таблицей плюс итог за год.",
@@ -1118,9 +1121,8 @@ def _owner_name(pilot: Pilot) -> str:
 async def report_menu(call: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
     lines = ["\U0001f4c4 <b>Отчёты PDF</b>", ""]
-    for kind, title in lkb.REPORT_TITLES.items():
-        lines.append(f"{title} \u2014 <i>{REPORT_HINTS[kind]}</i>")
-    lines += ["", "<i>Отчёты на английском: их принимают за рубежом.</i>"]
+    for kind in ("year", "month", "full", "summary"):
+        lines.append(f"{lkb.REPORT_TITLES[kind]} \u2014 <i>{REPORT_HINTS[kind]}</i>")
     await _render(call, "\n".join(lines), lkb.report_menu())
     await call.answer()
 
@@ -1138,10 +1140,10 @@ async def whole_logbook_report(
     owner = _owner_name(pilot)
     if callback_data.kind == "summary":
         data = pdf_reports.build_summary(owner, flights)
-        caption = "\U0001f4c4 <b>Summary of flight experience</b>"
+        caption = "\U0001f4c4 <b>Сводка по карьере</b>"
     else:
         data = pdf_reports.build_full(owner, flights)
-        caption = "\U0001f4da <b>Complete logbook</b>"
+        caption = "\U0001f4da <b>Вся книжка</b>"
 
     await _send_pdf(call.message, data, callback_data.kind, None, caption, len(flights))
 
@@ -1167,7 +1169,7 @@ async def year_report(
     data = pdf_reports.build_year(_owner_name(pilot), flights, callback_data.year)
     await _send_pdf(
         call.message, data, "year", str(callback_data.year),
-        f"\U0001f4c5 <b>Year {callback_data.year}</b>", len(flights),
+        f"\U0001f4c5 <b>Отчёт за {callback_data.year} год</b>", len(flights),
     )
 
 
@@ -1205,7 +1207,8 @@ async def month_report(
     period = f"{callback_data.year}-{callback_data.month:02d}"
     await _send_pdf(
         call.message, data, "month", period,
-        f"\U0001f5d3\ufe0f <b>{period}</b>", len(flights),
+        f"\U0001f5d3\ufe0f <b>{MONTHS_RU[callback_data.month]} "
+        f"{callback_data.year}</b>", len(flights),
     )
 
 

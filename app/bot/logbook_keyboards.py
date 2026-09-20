@@ -392,7 +392,7 @@ REPORT_TITLES = {
 
 def report_menu() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    for kind in ("summary", "year", "month", "full"):
+    for kind in ("year", "month", "full", "summary"):
         builder.row(
             InlineKeyboardButton(
                 text=REPORT_TITLES[kind], callback_data=ReportCB(kind=kind).pack()
