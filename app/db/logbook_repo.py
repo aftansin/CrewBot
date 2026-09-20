@@ -774,3 +774,35 @@ async def crew_of(session: AsyncSession, flight_id: int) -> list[tuple[str, str]
         for link in links
         if link.person
     ]
+
+
+async def flights_for_report(
+    session: AsyncSession,
+    pilot_id: int,
+    year: int | None = None,
+    month: int | None = None,
+) -> list[Flight]:
+    stmt = select(Flight).where(Flight.pilot_id == pilot_id)
+    if year:
+        start = date(year, month or 1, 1)
+        if month:
+            end = date(year + 1, 1, 1) if month == 12 else date(year, month + 1, 1)
+        else:
+            end = date(year + 1, 1, 1)
+        stmt = stmt.where(Flight.flight_date >= start, Flight.flight_date < end)
+    stmt = stmt.order_by(Flight.flight_date, Flight.out_utc)
+    return list((await session.execute(stmt)).scalars().all())
+
+
+async def logged_years(session: AsyncSession, pilot_id: int) -> list[int]:
+    stmt = select(Flight.flight_date).where(Flight.pilot_id == pilot_id)
+    return sorted({d.year for d in (await session.execute(stmt)).scalars().all()})
+
+
+async def logged_months(session: AsyncSession, pilot_id: int, year: int) -> list[int]:
+    stmt = select(Flight.flight_date).where(
+        Flight.pilot_id == pilot_id,
+        Flight.flight_date >= date(year, 1, 1),
+        Flight.flight_date < date(year + 1, 1, 1),
+    )
+    return sorted({d.month for d in (await session.execute(stmt)).scalars().all()})

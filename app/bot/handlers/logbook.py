@@ -35,6 +35,7 @@ from app.logbook.timeinput import (
     parse_manual_flight,
     validate,
 )
+from app.reports import pdf as pdf_reports
 from app.sync.render import esc, fmt_minutes, function_label
 
 logger = logging.getLogger(__name__)
@@ -1045,3 +1046,127 @@ async def save_manual_flight(
         lkb.flight_card_keyboard(flight.id, 0),
     )
     await call.answer("Сохранено")
+
+
+
+# --------------------------------------------------------------------------
+# Отчёты в PDF
+# --------------------------------------------------------------------------
+
+REPORT_HINTS = {
+    "summary": "Итоги по годам и типам ВС на одной странице. Для резюме.",
+    "year": "Месяцы таблицей плюс итог за год.",
+    "month": "Каждый рейс строкой за один месяц.",
+    "full": "Вся книжка, каждый рейс строкой. Файл большой.",
+}
+
+
+def _owner_name(pilot: Pilot) -> str:
+    return pilot.display_name
+
+
+@router.callback_query(lkb.ReportCB.filter(F.kind == "menu"))
+async def report_menu(call: CallbackQuery, state: FSMContext) -> None:
+    await state.clear()
+    lines = ["\U0001f4c4 <b>Отчёты PDF</b>", ""]
+    for kind, title in lkb.REPORT_TITLES.items():
+        lines.append(f"{title} \u2014 <i>{REPORT_HINTS[kind]}</i>")
+    lines += ["", "<i>Отчёты на английском: их принимают за рубежом.</i>"]
+    await _render(call, "\n".join(lines), lkb.report_menu())
+    await call.answer()
+
+
+@router.callback_query(lkb.ReportCB.filter(F.kind.in_({"summary", "full"})))
+async def whole_logbook_report(
+    call: CallbackQuery, callback_data: lkb.ReportCB, session: AsyncSession, pilot: Pilot
+) -> None:
+    await call.answer("Собираю отчёт\u2026")
+    flights = await lrepo.flights_for_report(session, pilot.id)
+    if not flights:
+        await _render(call, "В книжке пока нет записей.", lkb.back_to_logbook())
+        return
+
+    owner = _owner_name(pilot)
+    if callback_data.kind == "summary":
+        data = pdf_reports.build_summary(owner, flights)
+        caption = "\U0001f4c4 <b>Summary of flight experience</b>"
+    else:
+        data = pdf_reports.build_full(owner, flights)
+        caption = "\U0001f4da <b>Complete logbook</b>"
+
+    await _send_pdf(call.message, data, callback_data.kind, None, caption, len(flights))
+
+
+@router.callback_query(lkb.ReportCB.filter(F.kind == "year"))
+async def year_report(
+    call: CallbackQuery, callback_data: lkb.ReportCB, session: AsyncSession, pilot: Pilot
+) -> None:
+    if not callback_data.year:
+        years = await lrepo.logged_years(session, pilot.id)
+        if not years:
+            await _render(call, "В книжке пока нет записей.", lkb.back_to_logbook())
+            await call.answer()
+            return
+        await _render(
+            call, "За какой год?", lkb.report_years_keyboard(years, "year")
+        )
+        await call.answer()
+        return
+
+    await call.answer("Собираю отчёт\u2026")
+    flights = await lrepo.flights_for_report(session, pilot.id, callback_data.year)
+    data = pdf_reports.build_year(_owner_name(pilot), flights, callback_data.year)
+    await _send_pdf(
+        call.message, data, "year", str(callback_data.year),
+        f"\U0001f4c5 <b>Year {callback_data.year}</b>", len(flights),
+    )
+
+
+@router.callback_query(lkb.ReportCB.filter(F.kind == "month"))
+async def month_report(
+    call: CallbackQuery, callback_data: lkb.ReportCB, session: AsyncSession, pilot: Pilot
+) -> None:
+    if not callback_data.year:
+        years = await lrepo.logged_years(session, pilot.id)
+        if not years:
+            await _render(call, "В книжке пока нет записей.", lkb.back_to_logbook())
+            await call.answer()
+            return
+        await _render(call, "За какой год?", lkb.report_years_keyboard(years, "month"))
+        await call.answer()
+        return
+
+    if not callback_data.month:
+        months = await lrepo.logged_months(session, pilot.id, callback_data.year)
+        await _render(
+            call,
+            f"За какой месяц {callback_data.year} года?",
+            lkb.report_months_keyboard(callback_data.year, months),
+        )
+        await call.answer()
+        return
+
+    await call.answer("Собираю отчёт\u2026")
+    flights = await lrepo.flights_for_report(
+        session, pilot.id, callback_data.year, callback_data.month
+    )
+    data = pdf_reports.build_month(
+        _owner_name(pilot), flights, callback_data.year, callback_data.month
+    )
+    period = f"{callback_data.year}-{callback_data.month:02d}"
+    await _send_pdf(
+        call.message, data, "month", period,
+        f"\U0001f5d3\ufe0f <b>{period}</b>", len(flights),
+    )
+
+
+async def _send_pdf(
+    message: Message, data: bytes, kind: str, period: str | None,
+    caption: str, count: int,
+) -> None:
+    document = BufferedInputFile(data, filename=pdf_reports.filename(kind, period))
+    await message.answer_document(
+        document,
+        caption=f"{caption}\n\nРейсов в отчёте: {count}",
+        reply_markup=lkb.report_menu(),
+    )

@@ -32,6 +32,7 @@ def logbook_menu() -> InlineKeyboardMarkup:
     builder.button(text="\u2708\ufe0f Записать рейс", callback_data=LogCB(action="pending"))
     builder.button(text="\U0001f4d6 Последние записи", callback_data=LogCB(action="recent"))
     builder.button(text="\U0001f50d Поиск", callback_data=FindCB(kind="menu"))
+    builder.button(text="\U0001f4c4 Отчёты PDF", callback_data=ReportCB(kind="menu"))
     builder.button(text="\u25c0\ufe0f Меню", callback_data=MenuCB(action="main"))
     builder.adjust(1)
     return builder.as_markup()
@@ -368,6 +369,72 @@ def manual_tail_keyboard(found) -> InlineKeyboardMarkup:
     builder.row(
         InlineKeyboardButton(
             text="\u274c Отмена", callback_data=LogCB(action="menu").pack()
+        )
+    )
+    return builder.as_markup()
+
+
+class ReportCB(CallbackData, prefix="rep"):
+    """Отчёты в PDF."""
+    kind: str = "menu"     # menu | summary | year | month | full
+    year: int = 0
+    month: int = 0
+
+
+REPORT_TITLES = {
+    "summary": "\U0001f4c4 Сводка по карьере",
+    "year": "\U0001f4c5 За год",
+    "month": "\U0001f5d3\ufe0f За месяц",
+    "full": "\U0001f4da Вся книжка",
+}
+
+
+def report_menu() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    for kind in ("summary", "year", "month", "full"):
+        builder.row(
+            InlineKeyboardButton(
+                text=REPORT_TITLES[kind], callback_data=ReportCB(kind=kind).pack()
+            )
+        )
+    builder.row(
+        InlineKeyboardButton(
+            text="\u25c0\ufe0f Книжка", callback_data=LogCB(action="menu").pack()
+        )
+    )
+    return builder.as_markup()
+
+
+def report_years_keyboard(years: list[int], kind: str) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    for year in sorted(years, reverse=True):
+        builder.button(
+            text=str(year), callback_data=ReportCB(kind=kind, year=year)
+        )
+    builder.adjust(4)
+    builder.row(
+        InlineKeyboardButton(
+            text="\u25c0\ufe0f Отчёты", callback_data=ReportCB(kind="menu").pack()
+        )
+    )
+    return builder.as_markup()
+
+
+MONTH_NAMES = ("", "янв", "фев", "мар", "апр", "май", "июн",
+               "июл", "авг", "сен", "окт", "ноя", "дек")
+
+
+def report_months_keyboard(year: int, months: list[int]) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    for month in sorted(months):
+        builder.button(
+            text=MONTH_NAMES[month],
+            callback_data=ReportCB(kind="month", year=year, month=month),
+        )
+    builder.adjust(4)
+    builder.row(
+        InlineKeyboardButton(
+            text="\u25c0\ufe0f Годы", callback_data=ReportCB(kind="month").pack()
         )
     )
     return builder.as_markup()
