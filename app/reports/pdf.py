@@ -294,8 +294,8 @@ def _detail_pages(pdf: LogbookPDF, flights: list[Flight]) -> Totals:
 
 # Одинаковые ширины во всех таблицах сводки: разнобой колонок на одной
 # странице читается как небрежность.
-SUMMARY_COLUMNS = [("", 58), ("FLIGHTS", 24), ("TOTAL", 26), ("PIC", 26),
-                   ("SIC", 26), ("NIGHT", 26)]
+SUMMARY_COLUMNS = [("", 74), ("FLIGHTS", 20), ("TOTAL", 24), ("PIC", 24),
+                   ("SIC", 24), ("NIGHT", 24)]
 
 
 def _summary_table(pdf: LogbookPDF, first_header: str, rows: list[tuple[str, Totals]],
@@ -305,7 +305,7 @@ def _summary_table(pdf: LogbookPDF, first_header: str, rows: list[tuple[str, Tot
     widths = [w for _, w in columns]
     for label, totals in rows:
         pdf.row([
-            (label[:34], widths[0], Align.L),
+            (label[:46], widths[0], Align.L),
             (str(totals.flights), widths[1], Align.R),
             (hhmm(totals.block), widths[2], Align.R),
             (hhmm(totals.pic), widths[3], Align.R),
