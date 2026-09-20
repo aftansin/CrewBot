@@ -25,7 +25,14 @@ from app.config import Settings
 from app.db import logbook_repo as lrepo
 from app.db.models import FlightSource, Function, Pilot
 from app.icalendar_feed.parse import month_bounds
-from app.logbook.backup import build_backup, filename_for, summary_text, to_bytes
+from app.logbook.backup import (
+    build_backup,
+    build_csv,
+    csv_filename,
+    filename_for,
+    summary_text,
+    to_bytes,
+)
 from app.logbook.draft import draft_from_event, resolve_airports, suggested_function
 from app.logbook.tail import suggest_tail
 from app.logbook.timeinput import (
@@ -53,6 +60,10 @@ class LogStates(StatesGroup):
     searching = State()
     manual_entry = State()
     manual_tail = State()
+    fleet_add = State()
+    fleet_type = State()
+    fleet_ra = State()
+    fleet_note = State()
 
 
 # --------------------------------------------------------------------------
@@ -895,10 +906,48 @@ async def cmd_backup(message: Message, session: AsyncSession, pilot: Pilot) -> N
 
 
 @router.callback_query(lkb.LogCB.filter(F.action == "backup"))
-async def make_backup(call: CallbackQuery, session: AsyncSession, pilot: Pilot) -> None:
+async def choose_backup_format(call: CallbackQuery) -> None:
+    await _render(
+        call,
+        "\U0001f4be <b>Резервная копия</b>\n\n"
+        "<b>JSON</b> \u2014 полная копия: рейсы, экипажи, справочники, "
+        "история правок. Из неё книжку можно восстановить.\n\n"
+        "<b>CSV</b> \u2014 таблица для Excel: одна строка на рейс. "
+        "Удобно смотреть и переносить в другие программы, но это не "
+        "копия для восстановления.",
+        lkb.backup_format_keyboard(),
+    )
+    await call.answer()
+
+
+@router.callback_query(lkb.BackupFormatCB.filter())
+async def make_backup(
+    call: CallbackQuery, callback_data: lkb.BackupFormatCB,
+    session: AsyncSession, pilot: Pilot,
+) -> None:
     await call.answer("Собираю копию\u2026")
-    if call.message is not None:
+    if call.message is None:
+        return
+    if callback_data.fmt == "csv":
+        await _send_csv(call.message, session, pilot.id)
+    else:
         await _send_backup(call.message, session, pilot.id)
+
+
+async def _send_csv(message: Message, session: AsyncSession, pilot_id: int) -> None:
+    data = await build_csv(session, pilot_id)
+    rows = data.decode("utf-8-sig").count("\r\n") - 1
+    document = BufferedInputFile(data, filename=csv_filename(pilot_id))
+    await message.answer_document(
+        document,
+        caption=(
+            "\U0001f4ca <b>Книжка в CSV</b>\n\n"
+            f"Рейсов: {rows}\n\n"
+            "<i>Разделитель \u2014 точка с запятой, кодировка UTF-8 с BOM: "
+            "Excel откроет как надо.</i>"
+        ),
+        reply_markup=lkb.back_to_logbook(),
+    )
 
 
 async def _send_backup(message: Message, session: AsyncSession, pilot_id: int) -> None:
@@ -1004,9 +1053,9 @@ async def search_manual_tail(
     found = await lrepo.search_aircraft(session, message.text.strip())
     if not found:
         await message.answer(
-            "Ничего не нашлось. Попробуйте другую часть номера.\n"
-            "<i>Если борта нет в книжке, заведите его через правку "
-            "уже записанного рейса.</i>"
+            "Ничего не нашлось.\n\n"
+            "<i>Если этого борта в книжке ещё нет, заведите его: "
+            "меню книжки \u2192 Борты \u2192 Добавить.</i>"
         )
         return
     await message.answer(
@@ -1169,4 +1218,174 @@ async def _send_pdf(
         document,
         caption=f"{caption}\n\nРейсов в отчёте: {count}",
         reply_markup=lkb.report_menu(),
+    )
+
+
+
+# --------------------------------------------------------------------------
+# Борты
+# --------------------------------------------------------------------------
+
+FLEET_PAGE = 10
+
+
+@router.callback_query(lkb.FleetCB.filter(F.action == "list"))
+async def fleet_list(
+    call: CallbackQuery, callback_data: lkb.FleetCB, session: AsyncSession,
+    pilot: Pilot, state: FSMContext,
+) -> None:
+    await state.clear()
+    items = await lrepo.list_aircraft_with_use(session, pilot.id)
+    if not items:
+        await _render(call, "Бортов пока нет.", lkb.fleet_keyboard([], 0, 1))
+        await call.answer()
+        return
+
+    pages = max(1, (len(items) + FLEET_PAGE - 1) // FLEET_PAGE)
+    page = max(0, min(callback_data.page, pages - 1))
+    chunk = items[page * FLEET_PAGE : (page + 1) * FLEET_PAGE]
+
+    flown = sum(1 for _a, count, _m in items if count)
+    total = sum(minutes for _a, _c, minutes in items)
+    text = (
+        f"\u2708\ufe0f <b>Борты</b> \u2014 всего {len(items)}\n"
+        f"Летали на {flown}, суммарно {fmt_minutes(total)}\n\n"
+        "<i>Нажмите на борт, чтобы посмотреть или поправить.</i>"
+    )
+    await _render(call, text, lkb.fleet_keyboard(chunk, page, pages))
+    await call.answer()
+
+
+@router.callback_query(lkb.FleetCB.filter(F.action == "card"))
+async def fleet_card(
+    call: CallbackQuery, callback_data: lkb.FleetCB, session: AsyncSession, pilot: Pilot
+) -> None:
+    aircraft = await lrepo.aircraft_by_id(session, callback_data.aircraft_id)
+    if aircraft is None:
+        await call.answer("Борт не найден", show_alert=True)
+        return
+
+    items = await lrepo.list_aircraft_with_use(session, pilot.id)
+    stats = next(((c, m) for a, c, m in items if a.id == aircraft.id), (0, 0))
+
+    lines = [f"\u2708\ufe0f <b>{esc(aircraft.display)}</b>", ""]
+    if aircraft.registration_ra and aircraft.registration_ra != aircraft.registration:
+        lines.append(f"Регистрации  {esc(aircraft.registration)} / "
+                     f"{esc(aircraft.registration_ra)}")
+    else:
+        lines.append(f"Регистрация  {esc(aircraft.registration)}")
+    lines.append(f"Тип          {esc(aircraft.type_name or '\u2014')}"
+                 + (f"  ({esc(aircraft.type_code)})" if aircraft.type_code else ""))
+    lines.append(f"Рейсов       {stats[0]}")
+    lines.append(f"Налёт        <b>{fmt_minutes(stats[1])}</b>")
+    if aircraft.note:
+        lines += ["", f"\U0001f4dd <i>{esc(aircraft.note)}</i>"]
+
+    await _render(
+        call, "\n".join(lines),
+        lkb.aircraft_card_keyboard(aircraft.id, callback_data.page),
+    )
+    await call.answer()
+
+
+@router.callback_query(lkb.FleetCB.filter(F.action == "add"))
+async def fleet_ask_new(call: CallbackQuery, state: FSMContext) -> None:
+    await state.set_state(LogStates.fleet_add)
+    await _render(
+        call,
+        "\u2795 <b>Новый борт</b>\n\n"
+        "Регистрация и тип одной строкой:\n"
+        "<code>RA-73126/VQ-BWF 737-800 (B738)</code>\n\n"
+        "Через слэш \u2014 вторая регистрация, если у борта их две. "
+        "Тип можно не указывать:\n"
+        "<code>N172SP Cessna 172</code>\n"
+        "<code>RA-73126</code>",
+        lkb.fleet_cancel_keyboard(),
+    )
+    await call.answer()
+
+
+@router.message(StateFilter(LogStates.fleet_add), F.text)
+async def fleet_create(
+    message: Message, state: FSMContext, session: AsyncSession
+) -> None:
+    parsed = lrepo.parse_aircraft_line(message.text)
+    if parsed is None:
+        await message.answer(
+            "\u274c Не разобрал. Первым должна идти регистрация.\n"
+            "Например: <code>RA-73126 737-800</code>"
+        )
+        return
+
+    registration, registration_ra, type_name = parsed
+    aircraft = await lrepo.create_aircraft(
+        session, registration, registration_ra, type_name
+    )
+    if aircraft is None:
+        await message.answer(
+            f"Борт {esc(registration)} уже есть в книжке.",
+            reply_markup=lkb.fleet_cancel_keyboard(),
+        )
+        return
+
+    await session.commit()
+    await state.clear()
+    await message.answer(
+        f"\u2705 Борт <b>{esc(aircraft.display)}</b> добавлен."
+        + (f"\nТип: {esc(aircraft.type_name)}" if aircraft.type_name else ""),
+        reply_markup=lkb.aircraft_card_keyboard(aircraft.id, 0),
+    )
+
+
+FLEET_PROMPTS = {
+    "type": ("тип борта", "<code>737-800 (B738)</code>", LogStates.fleet_type),
+    "ra": ("вторую регистрацию", "<code>RA-73126</code>", LogStates.fleet_ra),
+    "note": ("заметку", "<code>SELCAL AB-CD</code>", LogStates.fleet_note),
+}
+
+
+@router.callback_query(lkb.FleetCB.filter(F.action.in_({"type", "ra", "note"})))
+async def fleet_ask_field(
+    call: CallbackQuery, callback_data: lkb.FleetCB, state: FSMContext
+) -> None:
+    label, example, target = FLEET_PROMPTS[callback_data.action]
+    await state.set_state(target)
+    await state.update_data(aircraft_id=callback_data.aircraft_id, page=callback_data.page)
+    await _render(
+        call,
+        f"Пришлите {label}:\n{example}\n\n"
+        "<i>Чтобы очистить \u2014 отправьте <code>-</code></i>",
+        lkb.fleet_cancel_keyboard(callback_data.page),
+    )
+    await call.answer()
+
+
+@router.message(
+    StateFilter(LogStates.fleet_type, LogStates.fleet_ra, LogStates.fleet_note), F.text
+)
+async def fleet_apply_field(
+    message: Message, state: FSMContext, session: AsyncSession
+) -> None:
+    current = await state.get_state()
+    data = await state.get_data()
+    aircraft = await lrepo.aircraft_by_id(session, data["aircraft_id"])
+    if aircraft is None:
+        await message.answer("Борт потерялся. Откройте заново: /logbook")
+        await state.clear()
+        return
+
+    value = message.text.strip()
+    value = "" if value == "-" else value
+    if current == LogStates.fleet_type.state:
+        await lrepo.update_aircraft(session, aircraft, type_name=value)
+    elif current == LogStates.fleet_ra.state:
+        await lrepo.update_aircraft(session, aircraft, registration_ra=value)
+    else:
+        await lrepo.update_aircraft(session, aircraft, note=value[:300])
+
+    await session.commit()
+    await state.clear()
+    await message.answer(
+        f"\u2705 Обновлено: <b>{esc(aircraft.display)}</b>",
+        reply_markup=lkb.aircraft_card_keyboard(aircraft.id, data.get("page", 0)),
     )

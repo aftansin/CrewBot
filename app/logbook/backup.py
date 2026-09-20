@@ -156,3 +156,92 @@ def summary_text(backup: dict) -> str:
 def filename_for(pilot_id: int, when: datetime | None = None) -> str:
     stamp = (when or datetime.now()).strftime("%Y-%m-%d")
     return f"logbook-{pilot_id}-{stamp}.json"
+
+
+# --------------------------------------------------------------------------
+# CSV
+# --------------------------------------------------------------------------
+
+CSV_COLUMNS = (
+    "date", "flight_number", "from_icao", "to_icao", "aircraft",
+    "aircraft_type", "out_utc", "in_utc", "block_hhmm", "block_minutes",
+    "night_hhmm", "function", "pic_name", "sic_name", "crew",
+    "employer", "day_landings", "night_landings", "duty_hhmm",
+    "remarks", "source",
+)
+
+CSV_ROLE_ORDER = ("PIC", "SIC", "RELIEF", "RELIEF2", "INSTRUCTOR",
+                  "STUDENT", "OBSERVER", "CABIN")
+
+
+def _hhmm(minutes: int | None) -> str:
+    total = minutes or 0
+    return f"{total // 60}:{total % 60:02d}"
+
+
+async def build_csv(session: AsyncSession, pilot_id: int) -> bytes:
+    """Плоская выгрузка рейсов в CSV.
+
+    В отличие от JSON, это не резервная копия для восстановления, а
+    таблица для Excel и для переноса в другие программы: одна строка —
+    один рейс, экипаж собран в одну ячейку.
+
+    Разделитель — точка с запятой, кодировка с BOM: иначе Excel
+    открывает файл одной колонкой и портит кириллицу.
+    """
+    import csv
+    import io
+
+    stmt = (
+        select(Flight)
+        .where(Flight.pilot_id == pilot_id)
+        .order_by(Flight.flight_date, Flight.out_utc)
+    )
+    flights = list((await session.execute(stmt)).scalars().all())
+
+    buffer = io.StringIO()
+    writer = csv.writer(buffer, delimiter=";", lineterminator="\r\n")
+    writer.writerow(CSV_COLUMNS)
+
+    for flight in flights:
+        by_role: dict[str, list[str]] = {}
+        for link in flight.crew:
+            if link.person:
+                by_role.setdefault(link.role.value, []).append(link.person.display)
+
+        crew_text = "; ".join(
+            f"{role}: {', '.join(names)}"
+            for role in CSV_ROLE_ORDER
+            if (names := by_role.get(role))
+        )
+
+        writer.writerow([
+            flight.flight_date.isoformat(),
+            flight.flight_number or "",
+            flight.dep_icao or "",
+            flight.arr_icao or "",
+            flight.aircraft.display if flight.aircraft else "",
+            (flight.aircraft.type_name or "") if flight.aircraft else "",
+            flight.out_utc.strftime("%H:%M") if flight.out_utc else "",
+            flight.in_utc.strftime("%H:%M") if flight.in_utc else "",
+            _hhmm(flight.block_minutes),
+            flight.block_minutes or 0,
+            _hhmm(flight.night_minutes),
+            flight.function.value,
+            ", ".join(by_role.get("PIC", [])),
+            ", ".join(by_role.get("SIC", [])),
+            crew_text,
+            flight.employer.name if flight.employer else "",
+            flight.day_landings or 0,
+            flight.night_landings or 0,
+            _hhmm(flight.duty_minutes),
+            (flight.remarks or "").replace("\n", " "),
+            flight.source.value,
+        ])
+
+    return buffer.getvalue().encode("utf-8-sig")
+
+
+def csv_filename(pilot_id: int, when: datetime | None = None) -> str:
+    stamp = (when or datetime.now()).strftime("%Y-%m-%d")
+    return f"logbook-{pilot_id}-{stamp}.csv"

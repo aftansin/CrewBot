@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
@@ -806,3 +807,117 @@ async def logged_months(session: AsyncSession, pilot_id: int, year: int) -> list
         Flight.flight_date < date(year + 1, 1, 1),
     )
     return sorted({d.month for d in (await session.execute(stmt)).scalars().all()})
+
+
+# --------------------------------------------------------------------------
+# Борты
+# --------------------------------------------------------------------------
+
+# "RA-73126/VQ-BWF 737-800 (B738)" — вторая регистрация через слэш,
+# тип всё, что после пробела. Тип и вторая регистрация необязательны.
+_REG_RE = re.compile(r"^[A-Z0-9]{1,3}-?[A-Z0-9]{2,6}$", re.IGNORECASE)
+
+
+def parse_aircraft_line(text: str) -> tuple[str, str | None, str | None] | None:
+    """Разбирает строку заведения борта.
+
+    Возвращает (регистрация, вторая регистрация, тип) или None.
+    """
+    parts = (text or "").strip().split(maxsplit=1)
+    if not parts:
+        return None
+
+    registrations = [p.strip().upper() for p in parts[0].split("/") if p.strip()]
+    if not registrations or not all(_REG_RE.match(r) for r in registrations):
+        return None
+
+    primary = registrations[0]
+    secondary = registrations[1] if len(registrations) > 1 else None
+    type_name = parts[1].strip() if len(parts) > 1 else None
+
+    # Российский номер держим во втором поле: по нему идёт склейка,
+    # и он же показывается в списках.
+    if secondary and primary.startswith("RA") and not secondary.startswith("RA"):
+        primary, secondary = secondary, primary
+    elif not secondary and primary.startswith("RA"):
+        return primary, primary, type_name
+    return primary, secondary, type_name
+
+
+async def list_aircraft_with_use(
+    session: AsyncSession, pilot_id: int
+) -> list[tuple[Aircraft, int, int]]:
+    """Борты со статистикой пилота: (борт, рейсов, минут)."""
+    stmt = select(Aircraft).order_by(Aircraft.registration)
+    machines = list((await session.execute(stmt)).scalars().all())
+
+    stmt = select(Flight).where(Flight.pilot_id == pilot_id)
+    flights = list((await session.execute(stmt)).scalars().all())
+
+    counts: dict[int, list[int]] = {}
+    for flight in flights:
+        if flight.aircraft_id:
+            slot = counts.setdefault(flight.aircraft_id, [0, 0])
+            slot[0] += 1
+            slot[1] += flight.block_minutes or 0
+
+    result = [(a, *counts.get(a.id, [0, 0])) for a in machines]
+    # Сначала те, на которых летали больше: искать чаще будут именно их.
+    result.sort(key=lambda item: (-item[2], item[0].display))
+    return result
+
+
+async def create_aircraft(
+    session: AsyncSession,
+    registration: str,
+    registration_ra: str | None = None,
+    type_name: str | None = None,
+) -> Aircraft | None:
+    """Заводит борт. Возвращает None, если такой уже есть."""
+    existing = await session.scalar(
+        select(Aircraft).where(Aircraft.registration == registration.upper())
+    )
+    if existing is not None:
+        return None
+
+    type_code = None
+    if type_name and "(" in type_name and type_name.endswith(")"):
+        type_name, _, code = type_name.rpartition("(")
+        type_code = code.rstrip(")").strip().upper()
+        type_name = type_name.strip()
+
+    aircraft = Aircraft(
+        registration=registration.upper(),
+        registration_ra=registration_ra.upper() if registration_ra else None,
+        type_name=type_name or None,
+        type_code=type_code,
+        multi_pilot=not (type_code or "").startswith("C17"),
+    )
+    session.add(aircraft)
+    await session.flush()
+    return aircraft
+
+
+async def update_aircraft(
+    session: AsyncSession,
+    aircraft: Aircraft,
+    type_name: str | None = None,
+    registration_ra: str | None = None,
+    note: str | None = None,
+) -> Aircraft:
+    if type_name is not None:
+        code = None
+        name = type_name
+        if "(" in name and name.endswith(")"):
+            name, _, raw = name.rpartition("(")
+            code = raw.rstrip(")").strip().upper()
+            name = name.strip()
+        aircraft.type_name = name or None
+        if code:
+            aircraft.type_code = code
+    if registration_ra is not None:
+        aircraft.registration_ra = registration_ra.upper() or None
+    if note is not None:
+        aircraft.note = note or None
+    await session.flush()
+    return aircraft

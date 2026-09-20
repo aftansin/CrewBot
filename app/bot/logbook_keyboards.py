@@ -33,6 +33,7 @@ def logbook_menu() -> InlineKeyboardMarkup:
     builder.button(text="\U0001f4d6 Последние записи", callback_data=LogCB(action="recent"))
     builder.button(text="\U0001f50d Поиск", callback_data=FindCB(kind="menu"))
     builder.button(text="\U0001f4c4 Отчёты PDF", callback_data=ReportCB(kind="menu"))
+    builder.button(text="\u2708\ufe0f Борты", callback_data=FleetCB(action="list"))
     builder.button(text="\u25c0\ufe0f Меню", callback_data=MenuCB(action="main"))
     builder.adjust(1)
     return builder.as_markup()
@@ -435,6 +436,101 @@ def report_months_keyboard(year: int, months: list[int]) -> InlineKeyboardMarkup
     builder.row(
         InlineKeyboardButton(
             text="\u25c0\ufe0f Годы", callback_data=ReportCB(kind="month").pack()
+        )
+    )
+    return builder.as_markup()
+
+
+class FleetCB(CallbackData, prefix="fleet"):
+    """Борты книжки."""
+    action: str = "list"     # list | card | add | type | ra | note
+    aircraft_id: int = 0
+    page: int = 0
+
+
+def fleet_keyboard(items, page: int, pages: int) -> InlineKeyboardMarkup:
+    """items — тройки (борт, рейсов, минут)."""
+    builder = InlineKeyboardBuilder()
+    for aircraft, _flights, minutes in items:
+        used = f"{minutes // 60}ч" if minutes else "не летали"
+        builder.row(
+            InlineKeyboardButton(
+                text=f"{aircraft.display}  {aircraft.type_code or ''}  {used}"[:64],
+                callback_data=FleetCB(
+                    action="card", aircraft_id=aircraft.id, page=page
+                ).pack(),
+            )
+        )
+    if pages > 1:
+        row = []
+        if page > 0:
+            row.append(InlineKeyboardButton(
+                text="\u25c0\ufe0f", callback_data=FleetCB(action="list", page=page - 1).pack()))
+        row.append(InlineKeyboardButton(
+            text=f"{page + 1}/{pages}", callback_data=LogCB(action="noop").pack()))
+        if page < pages - 1:
+            row.append(InlineKeyboardButton(
+                text="\u25b6\ufe0f", callback_data=FleetCB(action="list", page=page + 1).pack()))
+        builder.row(*row)
+    builder.row(
+        InlineKeyboardButton(
+            text="\u2795 Добавить борт", callback_data=FleetCB(action="add").pack()
+        )
+    )
+    builder.row(
+        InlineKeyboardButton(
+            text="\u25c0\ufe0f Книжка", callback_data=LogCB(action="menu").pack()
+        )
+    )
+    return builder.as_markup()
+
+
+def aircraft_card_keyboard(aircraft_id: int, page: int) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text="\U0001f6e0\ufe0f Тип",
+        callback_data=FleetCB(action="type", aircraft_id=aircraft_id, page=page),
+    )
+    builder.button(
+        text="\U0001f1f7\U0001f1fa Вторая регистрация",
+        callback_data=FleetCB(action="ra", aircraft_id=aircraft_id, page=page),
+    )
+    builder.button(
+        text="\U0001f4dd Заметка",
+        callback_data=FleetCB(action="note", aircraft_id=aircraft_id, page=page),
+    )
+    builder.adjust(1)
+    builder.row(
+        InlineKeyboardButton(
+            text="\u25c0\ufe0f К бортам",
+            callback_data=FleetCB(action="list", page=page).pack(),
+        )
+    )
+    return builder.as_markup()
+
+
+def fleet_cancel_keyboard(page: int = 0) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="\u274c Отмена", callback_data=FleetCB(action="list", page=page))
+    return builder.as_markup()
+
+
+
+class BackupFormatCB(CallbackData, prefix="bkp"):
+    """Формат резервной копии."""
+    fmt: str = "json"
+
+
+def backup_format_keyboard() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="\U0001f5c3\ufe0f JSON (для восстановления)",
+                   callback_data=BackupFormatCB(fmt="json"))
+    builder.button(text="\U0001f4ca CSV (для Excel)",
+                   callback_data=BackupFormatCB(fmt="csv"))
+    builder.adjust(1)
+    builder.row(
+        InlineKeyboardButton(
+            text="\u25c0\ufe0f Книжка", callback_data=LogCB(action="menu").pack()
         )
     )
     return builder.as_markup()
