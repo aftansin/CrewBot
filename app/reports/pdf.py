@@ -190,30 +190,27 @@ def _totals_block(pdf: LogbookPDF, title: str, totals: Totals) -> None:
 
 # Ширины под альбомный A4: сумма 277 мм — вся полезная ширина листа
 # за вычетом полей.
+# PIC и SIC отдельными колонками не нужны: функция в последнем столбце
+# говорит то же самое, а итоги по ним есть в сводном блоке под таблицей.
 FLIGHT_COLUMNS = [
-    ("DATE", 26), ("FLIGHT", 24), ("FROM", 22), ("TO", 22), ("AIRCRAFT", 34),
-    ("OUT", 20), ("IN", 20), ("TOTAL", 25), ("PIC", 24), ("SIC", 24),
-    ("NIGHT", 24), ("FUNC", 12),
+    ("DATE", 30), ("FLIGHT", 28), ("FROM", 26), ("TO", 26), ("AIRCRAFT", 40),
+    ("OUT", 24), ("IN", 24), ("TOTAL", 30), ("NIGHT", 28), ("FUNCTION", 21),
 ]
 
 
 def _flight_row(pdf: LogbookPDF, flight: Flight) -> None:
     tail = flight.aircraft.display if flight.aircraft else ""
-    pic = hhmm(flight.block_minutes) if flight.function in PIC_FUNCTIONS else ""
-    sic = hhmm(flight.block_minutes) if flight.function in COPILOT_FUNCTIONS else ""
     pdf.row([
-        (flight.flight_date.strftime("%d %b %y"), 26, Align.L),
-        (latin1(flight.flight_number), 24, Align.L),
-        (flight.dep_icao or "", 22, Align.C),
-        (flight.arr_icao or "", 22, Align.C),
-        (latin1(tail), 34, Align.L),
-        (flight.out_utc.strftime("%H:%M") if flight.out_utc else "", 20, Align.C),
-        (flight.in_utc.strftime("%H:%M") if flight.in_utc else "", 20, Align.C),
-        (hhmm(flight.block_minutes), 25, Align.R),
-        (pic, 24, Align.R),
-        (sic, 24, Align.R),
-        (hhmm(flight.night_minutes) if flight.night_minutes else "", 24, Align.R),
-        (FUNCTION_SHORT.get(flight.function, ""), 12, Align.C),
+        (flight.flight_date.strftime("%d %b %y"), 30, Align.L),
+        (latin1(flight.flight_number), 28, Align.L),
+        (flight.dep_icao or "", 26, Align.C),
+        (flight.arr_icao or "", 26, Align.C),
+        (latin1(tail), 40, Align.L),
+        (flight.out_utc.strftime("%H:%M") if flight.out_utc else "", 24, Align.C),
+        (flight.in_utc.strftime("%H:%M") if flight.in_utc else "", 24, Align.C),
+        (hhmm(flight.block_minutes), 30, Align.R),
+        (hhmm(flight.night_minutes) if flight.night_minutes else "", 28, Align.R),
+        (FUNCTION_SHORT.get(flight.function, ""), 21, Align.C),
     ])
 
 
@@ -231,62 +228,107 @@ def _detail_pages(pdf: LogbookPDF, flights: list[Flight]) -> Totals:
     pdf.row(
         [
             ("TOTAL", total_width, Align.R),
-            (hhmm(grand.block), 25, Align.R),
-            (hhmm(grand.pic), 24, Align.R),
-            (hhmm(grand.sic), 24, Align.R),
-            (hhmm(grand.night), 24, Align.R),
-            ("", 12, Align.C),
+            (hhmm(grand.block), 30, Align.R),
+            (hhmm(grand.night), 28, Align.R),
+            ("", 21, Align.C),
         ],
         bold=True,
     )
     return grand
 
 
+# Одинаковые ширины во всех таблицах сводки: разнобой колонок на одной
+# странице читается как небрежность.
+SUMMARY_COLUMNS = [("", 58), ("FLIGHTS", 24), ("TOTAL", 26), ("PIC", 26),
+                   ("SIC", 26), ("NIGHT", 26)]
+
+
+def _summary_table(pdf: LogbookPDF, first_header: str, rows: list[tuple[str, Totals]],
+                   total: Totals | None = None) -> None:
+    columns = [(first_header, SUMMARY_COLUMNS[0][1])] + SUMMARY_COLUMNS[1:]
+    pdf.table_header(columns)
+    widths = [w for _, w in columns]
+    for label, totals in rows:
+        pdf.row([
+            (label[:34], widths[0], Align.L),
+            (str(totals.flights), widths[1], Align.R),
+            (hhmm(totals.block), widths[2], Align.R),
+            (hhmm(totals.pic), widths[3], Align.R),
+            (hhmm(totals.sic), widths[4], Align.R),
+            (hhmm(totals.night), widths[5], Align.R),
+        ])
+    if total is not None:
+        pdf.row([
+            ("TOTAL", widths[0], Align.L),
+            (str(total.flights), widths[1], Align.R),
+            (hhmm(total.block), widths[2], Align.R),
+            (hhmm(total.pic), widths[3], Align.R),
+            (hhmm(total.sic), widths[4], Align.R),
+            (hhmm(total.night), widths[5], Align.R),
+        ], bold=True)
+
+
 def build_summary(owner: str, flights: list[Flight]) -> bytes:
-    """Одна страница: итоги по годам и за всю карьеру. Для резюме."""
+    """Одна страница: итоги по годам, компаниям и типам ВС. Для резюме."""
     pdf = LogbookPDF(owner, "Summary of flight experience")
     pdf.alias_nb_pages()
     pdf.add_page()
 
     by_year: dict[int, Totals] = defaultdict(Totals)
     by_type: dict[str, Totals] = defaultdict(Totals)
+    by_employer: dict[str, Totals] = defaultdict(Totals)
+    employer_span: dict[str, list[date]] = defaultdict(list)
     grand = Totals()
+
     for flight in flights:
         by_year[flight.flight_date.year].add(flight)
         grand.add(flight)
         kind = flight.aircraft.type_name if flight.aircraft else None
         by_type[latin1(kind) or "Unspecified"].add(flight)
 
+        employer = flight.employer
+        name = latin1(employer.name) if employer else "Unspecified"
+        # Один работодатель может встречаться дважды — уход и возвращение.
+        # Разделяем такие периоды по дате начала.
+        key = f"{name}|{employer.started_on:%Y}" if employer else name
+        by_employer[key].add(flight)
+        employer_span[key].append(flight.flight_date)
+
     _totals_block(pdf, "Grand total", grand)
 
+    pdf.section("By employer")
+    employer_rows = []
+    for key in sorted(by_employer, key=lambda k: min(employer_span[k])):
+        name = key.split("|")[0]
+        dates = employer_span[key]
+        span = f"{min(dates):%m.%Y} - {max(dates):%m.%Y}"
+        employer_rows.append((f"{name}  ({span})", by_employer[key]))
+    _summary_table(pdf, "EMPLOYER", employer_rows)
+
     pdf.section("By year")
-    columns = [("YEAR", 20), ("FLIGHTS", 22), ("TOTAL", 22), ("PIC", 22),
-               ("SIC", 22), ("NIGHT", 22)]
-    pdf.table_header(columns)
-    for year in sorted(by_year):
-        totals = by_year[year]
-        pdf.row([
-            (str(year), 20, Align.L), (str(totals.flights), 22, Align.R),
-            (hhmm(totals.block), 22, Align.R), (hhmm(totals.pic), 22, Align.R),
-            (hhmm(totals.sic), 22, Align.R), (hhmm(totals.night), 22, Align.R),
-        ])
+    _summary_table(
+        pdf, "YEAR", [(str(y), by_year[y]) for y in sorted(by_year)], grand
+    )
 
     pdf.section("By aircraft type")
-    columns = [("TYPE", 50), ("FLIGHTS", 22), ("TOTAL", 22), ("PIC", 22)]
-    pdf.table_header(columns)
-    for kind in sorted(by_type, key=lambda k: -by_type[k].block):
-        totals = by_type[kind]
-        pdf.row([
-            (kind[:28], 50, Align.L), (str(totals.flights), 22, Align.R),
-            (hhmm(totals.block), 22, Align.R), (hhmm(totals.pic), 22, Align.R),
-        ])
+    _summary_table(
+        pdf,
+        "TYPE",
+        [(k, by_type[k]) for k in sorted(by_type, key=lambda k: -by_type[k].block)],
+    )
 
     return bytes(pdf.output())
 
 
+YEAR_COLUMNS = [
+    ("MONTH", 37), ("FLIGHTS", 30), ("TOTAL", 36), ("PIC", 36),
+    ("SIC", 36), ("NIGHT", 36), ("DAY LDG", 32), ("NIGHT LDG", 34),
+]
+
+
 def build_year(owner: str, flights: list[Flight], year: int) -> bytes:
-    """Один год: месяцы таблицей плюс итог."""
-    pdf = LogbookPDF(owner, f"Year {year}")
+    """Один год: месяцы таблицей плюс итог. Альбомный лист, широкая таблица."""
+    pdf = LogbookPDF(owner, f"Year {year}", landscape=True)
     pdf.alias_nb_pages()
     pdf.add_page()
 
@@ -296,25 +338,36 @@ def build_year(owner: str, flights: list[Flight], year: int) -> bytes:
         by_month[flight.flight_date.month].add(flight)
         grand.add(flight)
 
-    columns = [("MONTH", 24), ("FLIGHTS", 20), ("TOTAL", 22), ("PIC", 22),
-               ("SIC", 22), ("NIGHT", 22), ("LDG", 18)]
-    pdf.table_header(columns)
+    pdf.table_header(YEAR_COLUMNS)
+    widths = [w for _, w in YEAR_COLUMNS]
     for month in range(1, 13):
         totals = by_month.get(month)
-        if totals is None:
-            continue
-        pdf.row([
-            (MONTHS[month], 24, Align.L), (str(totals.flights), 20, Align.R),
-            (hhmm(totals.block), 22, Align.R), (hhmm(totals.pic), 22, Align.R),
-            (hhmm(totals.sic), 22, Align.R), (hhmm(totals.night), 22, Align.R),
-            (str(totals.ldg_day + totals.ldg_night), 18, Align.R),
-        ])
-    pdf.row([
-        ("TOTAL", 24, Align.L), (str(grand.flights), 20, Align.R),
-        (hhmm(grand.block), 22, Align.R), (hhmm(grand.pic), 22, Align.R),
-        (hhmm(grand.sic), 22, Align.R), (hhmm(grand.night), 22, Align.R),
-        (str(grand.ldg_day + grand.ldg_night), 18, Align.R),
-    ], bold=True)
+        values = (
+            [str(totals.flights), hhmm(totals.block), hhmm(totals.pic),
+             hhmm(totals.sic), hhmm(totals.night), str(totals.ldg_day),
+             str(totals.ldg_night)]
+            if totals
+            # Пустые месяцы показываем прочерками: пропуск в таблице
+            # читается как потерянные данные.
+            else ["-"] * 7
+        )
+        pdf.row(
+            [(MONTHS[month], widths[0], Align.L)]
+            + [(v, widths[i + 1], Align.R) for i, v in enumerate(values)]
+        )
+
+    pdf.row(
+        [("TOTAL", widths[0], Align.L)]
+        + [
+            (v, widths[i + 1], Align.R)
+            for i, v in enumerate([
+                str(grand.flights), hhmm(grand.block), hhmm(grand.pic),
+                hhmm(grand.sic), hhmm(grand.night), str(grand.ldg_day),
+                str(grand.ldg_night),
+            ])
+        ],
+        bold=True,
+    )
 
     return bytes(pdf.output())
 
