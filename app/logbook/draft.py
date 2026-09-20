@@ -17,6 +17,7 @@ from datetime import datetime, timedelta
 
 from app.db.models import Event, EventKind
 from app.icalendar_feed.parse import parse_crew
+from app.logbook.translit import name_key, same_person
 
 # Рабочее время: час до планового отправления и полчаса после выключения.
 DUTY_BEFORE_DEPARTURE = timedelta(hours=1)
@@ -107,7 +108,11 @@ class FlightDraft:
         return max(0, int((end - start).total_seconds() // 60))
 
 
-def draft_from_event(event: Event, owner_last_name: str | None = None) -> FlightDraft | None:
+def draft_from_event(
+    event: Event,
+    owner_last_name: str | None = None,
+    owner_first_name: str | None = None,
+) -> FlightDraft | None:
     """Собирает черновик из события расписания.
 
     Возвращает None для всего, что не является рейсом: медкомиссия,
@@ -139,7 +144,9 @@ def draft_from_event(event: Event, owner_last_name: str | None = None) -> Flight
                 first_name=first or None,
                 middle_name=middle or None,
                 position=position,
-                is_owner=bool(owner_last_name) and last == owner_last_name,
+                # Лента может отдавать кириллицу, а книжка хранить
+                # латиницу — сравниваем через транслитерацию.
+                is_owner=_is_owner(last, first, owner_last_name, owner_first_name),
             )
         )
 
@@ -158,6 +165,16 @@ def resolve_airports(draft: FlightDraft, iata_to_icao: dict[str, str]) -> Flight
         if code and len(code) == 3:
             setattr(draft, field_name, iata_to_icao.get(code.upper(), code))
     return draft
+
+
+def _is_owner(
+    last: str, first: str | None, owner_last: str | None, owner_first: str | None
+) -> bool:
+    if not owner_last:
+        return False
+    if owner_first:
+        return same_person(last, first, owner_last, owner_first)
+    return name_key(last) == name_key(owner_last)
 
 
 def owner_position(draft: FlightDraft) -> str | None:

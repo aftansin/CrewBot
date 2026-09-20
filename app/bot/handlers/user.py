@@ -56,13 +56,14 @@ async def show_menu(target: Message | CallbackQuery, pilot: Pilot, is_admin: boo
     if pilot.ics_url:
         text = (
             f"\U0001f6eb <b>CrewBot</b>\n\n"
-            f"{esc(greeting)}, календарь привязан.\n"
+            f"{esc(greeting)}\n"
+            f"\u2705 Календарь привязан\n"
             f"{_sync_status_line(pilot)}"
         )
     else:
         text = (
             "\U0001f6eb <b>CrewBot</b>\n\n"
-            "Календарь пока не привязан.\n"
+            "\u274c Календарь не привязан\n\n"
             "Нажмите «Привязать календарь» и пришлите ссылку подписки."
         )
     markup = kb.main_menu(has_link=bool(pilot.ics_url), is_admin=is_admin)
@@ -212,17 +213,6 @@ async def back_to_main(call: CallbackQuery, pilot: Pilot, is_admin: bool, state:
     await state.clear()
     await show_menu(call, pilot, is_admin)
     await call.answer()
-
-
-@router.callback_query(kb.MenuCB.filter(F.action == "logbook"))
-async def open_logbook(call: CallbackQuery) -> None:
-    """Кнопка из главного меню. Экраны живут в роутере книжки."""
-    from app.bot import logbook_keyboards as lkb
-    from app.bot.handlers.logbook import show_logbook  # noqa: F401
-
-    await call.answer()
-    if call.message is not None:
-        await call.message.answer("Открываю книжку\u2026", reply_markup=lkb.logbook_menu())
 
 
 @router.callback_query(kb.MenuCB.filter(F.action == "noop"))
@@ -395,14 +385,31 @@ async def build_stats_text(session: AsyncSession, pilot: Pilot, settings: Settin
     tz = pilot_tz(pilot, settings)
     now = datetime.now(tz=tz)
 
+    from app.db import logbook_repo as lrepo
+
     lines = ["\U0001f4ca <b>Налёт</b>", ""]
-    for offset, label in ((-1, "Прошлый месяц"), (0, "Текущий месяц"), (1, "Следующий месяц")):
+    lines.append("<b>По расписанию</b> <i>(из календаря)</i>")
+    for offset, label in ((-1, "Прошлый"), (0, "Текущий"), (1, "Следующий")):
         start, end = month_bounds(now, tz, offset)
         minutes = await repo.get_flight_minutes(session, pilot.id, start, end)
-        bold = offset == 0
         value = fmt_minutes(minutes)
         row = f"{label} ({start:%m.%Y}): "
-        row += f"<b>{value}</b>" if bold else value
+        row += f"<b>{value}</b>" if offset == 0 else value
+        lines.append(row)
+
+    # Те же месяцы по книжке. Расписание показывает только текущий и
+    # следующий месяц, прошлый из ленты уже пропал — отсюда нули выше.
+    # Книжка помнит всё, поэтому цифры рядом и нужны.
+    lines.append("")
+    lines.append("<b>По книжке</b> <i>(фактический)</i>")
+    for offset, label in ((-1, "Прошлый"), (0, "Текущий")):
+        start, end = month_bounds(now, tz, offset)
+        totals = await lrepo.month_totals(session, pilot.id, start.date(), end.date())
+        value = fmt_minutes(totals["block"])
+        row = f"{label} ({start:%m.%Y}): "
+        row += f"<b>{value}</b>" if offset == 0 else value
+        if totals["night"]:
+            row += f"   ночь {fmt_minutes(totals['night'])}"
         lines.append(row)
 
     start, end = month_bounds(now, tz)
@@ -413,13 +420,16 @@ async def build_stats_text(session: AsyncSession, pilot: Pilot, settings: Settin
 
     if by_kind:
         lines.append("")
-        lines.append(f"<b>Состав месяца {start:%m.%Y}</b>")
+        lines.append(f"<b>Состав месяца {start:%m.%Y}</b> <i>(по расписанию)</i>")
         for kind, count in sorted(by_kind.items(), key=lambda kv: -kv[1]):
             icon = KIND_ICON.get(kind, "")
             lines.append(f"{icon} {KIND_LABEL.get(kind, kind.value)}: {count}")
 
     lines.append("")
-    lines.append("<i>Налёт считается по расписанию из календаря.</i>")
+    lines.append(
+        "<i>Расписание показывает текущий и следующий месяц, "
+        "прошлый из ленты уже пропал. Книжка помнит всё.</i>"
+    )
     return "\n".join(lines)
 
 

@@ -37,6 +37,10 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
 
+# BigInteger с автоинкрементом не поддерживается SQLite, на котором идут
+# локальные проверки. На Postgres тип остаётся BIGINT, DDL не меняется.
+BigIntPK = BigInteger().with_variant(Integer, "sqlite")
+
 
 class EventKind(str, enum.Enum):
     FLIGHT = "flight"          # рейс
@@ -124,7 +128,7 @@ class Event(Base):
         Index("ix_event_pilot_kind_status", "pilot_id", "kind", "status"),
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(BigIntPK, primary_key=True, autoincrement=True)
     pilot_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("pilot.id", ondelete="CASCADE"), nullable=False
     )
@@ -197,9 +201,6 @@ class Event(Base):
 # Привязка к пилоту: справочники бортов и аэропортов общие — Boeing 737
 # и Шереметьево одинаковы для всех. Люди, работодатели и рейсы у каждого
 # пилота свои: в карточках людей лежат личные заметки и фото.
-
-BigIntPK = BigInteger().with_variant(Integer, "sqlite")
-
 
 class Function(str, enum.Enum):
     """Функция пилота по AMC1 FCL.050."""
@@ -450,3 +451,30 @@ class FlightCrew(Base):
 
     flight: Mapped[Flight] = relationship(back_populates="crew")
     person: Mapped[Person] = relationship(lazy="selectin")
+
+
+class FlightRevision(Base):
+    """История правок записи.
+
+    Лётная книжка — документ, и молчаливая правка задним числом в ней
+    недопустима: через год будет не отличить исправленную опечатку от
+    подогнанной цифры. Поэтому каждое изменение сохраняется целиком —
+    что менялось, с чего на что и когда.
+
+    Записи истории не удаляются вместе с правкой, только вместе с рейсом.
+    """
+
+    __tablename__ = "flight_revision"
+    __table_args__ = (Index("ix_flight_revision_flight", "flight_id", "changed_at"),)
+
+    id: Mapped[int] = mapped_column(BigIntPK, primary_key=True, autoincrement=True)
+    flight_id: Mapped[int] = mapped_column(
+        ForeignKey("flight.id", ondelete="CASCADE"), nullable=False
+    )
+    field: Mapped[str] = mapped_column(String(32), nullable=False)
+    old_value: Mapped[str | None] = mapped_column(Text)
+    new_value: Mapped[str | None] = mapped_column(Text)
+    changed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    note: Mapped[str | None] = mapped_column(Text)

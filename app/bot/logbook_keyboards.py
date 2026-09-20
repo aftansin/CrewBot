@@ -22,6 +22,11 @@ class TailCB(CallbackData, prefix="tail"):
     aircraft_id: int
 
 
+class FuncCB(CallbackData, prefix="func"):
+    """Функция выбирается вручную, когда по ленте её определить не удалось."""
+    value: str
+
+
 def logbook_menu() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text="\u2708\ufe0f Записать рейс", callback_data=LogCB(action="pending"))
@@ -85,6 +90,23 @@ def recent_keyboard(page: int, pages: int) -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
+def draft_keyboard(uid: str) -> InlineKeyboardMarkup:
+    """Карточка рейса: ввод времён идёт сообщением, кнопки — для исключений."""
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(
+            text="\U0001f6ab Рейс не выполнялся",
+            callback_data=LogCB(action="skip", uid=uid).pack(),
+        )
+    )
+    builder.row(
+        InlineKeyboardButton(
+            text="\u274c Отмена", callback_data=LogCB(action="menu").pack()
+        )
+    )
+    return builder.as_markup()
+
+
 def tail_keyboard(suggestions) -> InlineKeyboardMarkup:
     """Подсказки бортов. Причина выбора видна на кнопке — подстановка
     не должна выглядеть как непонятно откуда взявшийся номер."""
@@ -129,4 +151,155 @@ def after_save_keyboard() -> InlineKeyboardMarkup:
     builder.button(text="\u2708\ufe0f Записать ещё", callback_data=LogCB(action="pending"))
     builder.button(text="\U0001f4d2 Книжка", callback_data=LogCB(action="menu"))
     builder.adjust(1)
+    return builder.as_markup()
+
+
+FUNCTION_CHOICES = (
+    ("pic", "\U0001f9d1\u200d\u2708\ufe0f КВС"),
+    ("copilot", "\U0001f464 Второй пилот"),
+    ("cruise_relief", "\U0001f6cb\ufe0f Усиленный экипаж"),
+    ("fi", "\U0001f393 Инструктор"),
+)
+
+
+def function_keyboard() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    for value, label in FUNCTION_CHOICES:
+        builder.row(
+            InlineKeyboardButton(text=label, callback_data=FuncCB(value=value).pack())
+        )
+    builder.row(
+        InlineKeyboardButton(
+            text="\u274c Отмена", callback_data=LogCB(action="menu").pack()
+        )
+    )
+    return builder.as_markup()
+
+
+class EditCB(CallbackData, prefix="edit"):
+    """Правка записи книжки."""
+    action: str          # open | times | aircraft | function | remarks | history
+    flight_id: int = 0
+    page: int = 0
+
+
+def flight_card_keyboard(flight_id: int, page: int) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text="\U0001f552 Времена",
+        callback_data=EditCB(action="times", flight_id=flight_id, page=page),
+    )
+    builder.button(
+        text="\u2708\ufe0f Борт",
+        callback_data=EditCB(action="aircraft", flight_id=flight_id, page=page),
+    )
+    builder.button(
+        text="\U0001f9d1\u200d\u2708\ufe0f Функция",
+        callback_data=EditCB(action="function", flight_id=flight_id, page=page),
+    )
+    builder.button(
+        text="\U0001f4dd Заметка",
+        callback_data=EditCB(action="remarks", flight_id=flight_id, page=page),
+    )
+    builder.adjust(2, 2)
+    builder.row(
+        InlineKeyboardButton(
+            text="\U0001f570\ufe0f История правок",
+            callback_data=EditCB(action="history", flight_id=flight_id, page=page).pack(),
+        )
+    )
+    builder.row(
+        InlineKeyboardButton(
+            text="\u25c0\ufe0f К записям",
+            callback_data=LogCB(action="recent", page=page).pack(),
+        )
+    )
+    return builder.as_markup()
+
+
+def edit_cancel_keyboard(flight_id: int, page: int) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text="\u274c Отмена",
+        callback_data=EditCB(action="open", flight_id=flight_id, page=page),
+    )
+    return builder.as_markup()
+
+
+def edit_function_keyboard(flight_id: int, page: int) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    for value, label in FUNCTION_CHOICES:
+        builder.row(
+            InlineKeyboardButton(
+                text=label,
+                callback_data=FuncEditCB(value=value, flight_id=flight_id, page=page).pack(),
+            )
+        )
+    builder.row(
+        InlineKeyboardButton(
+            text="\u274c Отмена",
+            callback_data=EditCB(action="open", flight_id=flight_id, page=page).pack(),
+        )
+    )
+    return builder.as_markup()
+
+
+class FuncEditCB(CallbackData, prefix="fedit"):
+    value: str
+    flight_id: int
+    page: int = 0
+
+
+class TailEditCB(CallbackData, prefix="tedit"):
+    aircraft_id: int
+    flight_id: int
+    page: int = 0
+
+
+def edit_tail_keyboard(found, flight_id: int, page: int) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    for aircraft in found:
+        label = aircraft.display
+        if aircraft.registration_ra and aircraft.registration != aircraft.registration_ra:
+            label = f"{aircraft.registration_ra} ({aircraft.registration})"
+        builder.row(
+            InlineKeyboardButton(
+                text=label[:64],
+                callback_data=TailEditCB(
+                    aircraft_id=aircraft.id, flight_id=flight_id, page=page
+                ).pack(),
+            )
+        )
+    builder.row(
+        InlineKeyboardButton(
+            text="\u274c Отмена",
+            callback_data=EditCB(action="open", flight_id=flight_id, page=page).pack(),
+        )
+    )
+    return builder.as_markup()
+
+
+def recent_entry_keyboard(flights, page: int, pages: int) -> InlineKeyboardMarkup:
+    """Записи кликабельны: нажатие открывает карточку рейса."""
+    builder = InlineKeyboardBuilder()
+    for flight in flights:
+        tail = flight.aircraft.display if flight.aircraft else "\u2014"
+        label = (
+            f"{flight.flight_date:%d.%m.%y} "
+            f"{flight.dep_icao}\u2192{flight.arr_icao} {tail}"
+        )
+        builder.row(
+            InlineKeyboardButton(
+                text=label[:64],
+                callback_data=EditCB(
+                    action="open", flight_id=flight.id, page=page
+                ).pack(),
+            )
+        )
+    _pager(builder, "recent", page, pages)
+    builder.row(
+        InlineKeyboardButton(
+            text="\u25c0\ufe0f Книжка", callback_data=LogCB(action="menu").pack()
+        )
+    )
     return builder.as_markup()

@@ -17,6 +17,17 @@ from app.sync.render import KIND_ICON, fmt_time, short_title
 PAGE_SIZE = 6
 
 
+class LogbookEntryCB(CallbackData, prefix="log"):
+    """Вход в книжку прямо из главного меню.
+
+    Префикс совпадает с LogCB, поэтому нажатие сразу попадает в роутер
+    книжки и открывает карточку, без промежуточного "Открываю книжку...".
+    """
+    action: str = "menu"
+    uid: str = ""
+    page: int = 0
+
+
 class MenuCB(CallbackData, prefix="menu"):
     action: str  # main | refresh | plan | stats | settings | link | unlink | help
 
@@ -53,7 +64,7 @@ def main_menu(has_link: bool, is_admin: bool) -> InlineKeyboardMarkup:
         builder.button(text="\U0001f501 Обновить план", callback_data=MenuCB(action="refresh"))
         builder.button(text="\U0001f4c5 Мой план", callback_data=PlanCB(page=0, scope="upcoming"))
         builder.button(text="\U0001f4ca Налёт", callback_data=MenuCB(action="stats"))
-        builder.button(text="\U0001f4d2 Книжка", callback_data=MenuCB(action="logbook"))
+        builder.button(text="\U0001f4d2 Книжка", callback_data=LogbookEntryCB())
         builder.button(text="\u2699\ufe0f Настройки", callback_data=MenuCB(action="settings"))
         builder.adjust(1, 2, 2)
     else:

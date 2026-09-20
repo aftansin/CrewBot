@@ -15,16 +15,32 @@ from app.db.models import (
     Employer,
     Event,
     EventKind,
+    EventStatus,
     Flight,
     FlightCrew,
+    FlightRevision,
     FlightSource,
     Function,
     Person,
     PersonAlias,
+    Pilot,
 )
 from app.logbook.draft import FlightDraft
 from app.logbook.link import snapshot_of
 from app.logbook.night import night_minutes
+from app.logbook.translit import person_key, same_script, to_display_latin
+
+
+def normalize_flight_number(value: str | None) -> str:
+    """Только цифры номера рейса.
+
+    В выгрузке LogTen номера записаны без кода перевозчика ("1562"),
+    а из ленты расписания приходит "SU1562". Сравнение как есть
+    не совпадало никогда — из-за этого бот предлагал записать рейсы,
+    которые уже лежали в книжке, и получались дубли.
+    """
+    return "".join(c for c in (value or "") if c.isdigit())
+
 
 POSITION_TO_ROLE = {
     "КВС": CrewRole.PIC,
@@ -67,6 +83,13 @@ async def pending_flights(
     """Рейсы из расписания, которые уже закончились, но в книжку не попали.
 
     Только рейсы: медкомиссия, учёба и явка в лётную книжку не идут.
+
+    Совпадение с уже записанным ищется двумя способами, и второй важнее
+    первого. По ``source_event_uid`` находятся рейсы, заведённые через
+    бота. Но у рейсов, перенесённых из LogTen, эта ссылка пустая — они
+    пришли из выгрузки, а не из календаря. Если проверять только её,
+    бот предложит записать заново всё, что уже есть в книжке, и создаст
+    дубли. Поэтому дополнительно сверяется дата и маршрут.
     """
     since = now - timedelta(days=back_days)
     stmt = (
@@ -76,6 +99,8 @@ async def pending_flights(
             Event.kind == EventKind.FLIGHT,
             Event.dtend <= now,
             Event.dtend >= since,
+            # Отменённый рейс записывать не предлагаем.
+            Event.status == EventStatus.SCHEDULED,
         )
         .order_by(Event.dtstart.desc())
     )
@@ -83,19 +108,87 @@ async def pending_flights(
     if not events:
         return []
 
-    logged = set(
-        (
-            await session.execute(
-                select(Flight.source_event_uid).where(
-                    Flight.pilot_id == pilot_id,
-                    Flight.source_event_uid.in_([e.uid for e in events]),
-                )
-            )
-        )
-        .scalars()
-        .all()
+    # План правится задним числом: рейс мог исчезнуть из расписания уже
+    # после даты вылета. Отмену прошедших событий diff намеренно не ставит
+    # (лента показывает ограниченное окно, старое из неё выпадает сама),
+    # поэтому здесь смотрим иначе: попало ли событие в последнюю выгрузку.
+    # Не попало — значит из плана его убрали, и рейс не выполнялся.
+    pilot = await session.get(Pilot, pilot_id)
+    if pilot is not None and pilot.last_sync_at is not None:
+        threshold = pilot.last_sync_at - timedelta(minutes=5)
+        events = [
+            e for e in events
+            if e.last_seen_at is not None and e.last_seen_at >= threshold
+        ]
+        if not events:
+            return []
+
+    days = {e.dtstart.date() for e in events}
+    stmt = select(Flight).where(
+        Flight.pilot_id == pilot_id,
+        Flight.flight_date >= min(days) - timedelta(days=1),
+        Flight.flight_date <= max(days) + timedelta(days=1),
     )
-    return [e for e in events if e.uid not in logged]
+    existing = list((await session.execute(stmt)).scalars().all())
+
+    by_uid = {f.source_event_uid for f in existing if f.source_event_uid}
+    # Коды в ленте IATA, в книжке ICAO — сравниваем в одном алфавите.
+    codes = {c for e in events for c in (e.dep_code, e.arr_code) if c}
+    mapping = await iata_to_icao_map(session, list(codes))
+
+    def route_key(day, dep, arr, number):
+        dep = mapping.get((dep or "").upper(), dep)
+        arr = mapping.get((arr or "").upper(), arr)
+        return (day, (dep or "").upper(), (arr or "").upper(),
+                normalize_flight_number(number))
+
+    # К ключу добавляется время вылета: за день по одному маршруту
+    # бывает две ротации, и одна не должна прятать другую.
+    by_route: dict[tuple, list[datetime]] = {}
+    for f in existing:
+        key = route_key(f.flight_date, f.dep_icao, f.arr_icao, f.flight_number)
+        by_route.setdefault(key, []).append(f.out_utc)
+
+    result = []
+    for event in events:
+        if event.uid in by_uid:
+            continue
+        key = route_key(
+            event.dtstart.date(), event.dep_code, event.arr_code, event.flight_no
+        )
+        times = by_route.get(key)
+        if times is not None and any(
+            t is None or abs((t - event.dtstart).total_seconds()) < 6 * 3600
+            for t in times
+        ):
+            continue
+        result.append(event)
+    return result
+
+
+async def find_duplicates(session: AsyncSession, pilot_id: int) -> list[tuple]:
+    """Рейсы, задублированные по дате, маршруту и номеру.
+
+    Нужны, чтобы вычистить последствия ошибки в определении незаписанных
+    рейсов. Возвращает пары (оставить, удалить).
+    """
+    stmt = select(Flight).where(Flight.pilot_id == pilot_id).order_by(Flight.id)
+    flights = list((await session.execute(stmt)).scalars().all())
+
+    seen: dict[tuple, Flight] = {}
+    pairs: list[tuple] = []
+    for flight in flights:
+        key = (
+            flight.flight_date,
+            (flight.dep_icao or "").upper(),
+            (flight.arr_icao or "").upper(),
+            normalize_flight_number(flight.flight_number),
+        )
+        if key in seen:
+            pairs.append((seen[key], flight))
+        else:
+            seen[key] = flight
+    return pairs
 
 
 async def event_by_uid(session: AsyncSession, pilot_id: int, uid: str) -> Event | None:
@@ -118,8 +211,13 @@ async def person_for_name(
 ) -> Person:
     """Находит человека по алиасу или заводит нового.
 
-    Слияние похожих фамилий не делается: в справочнике есть Evstafev
-    и Evstifeev — разные люди, отличающиеся двумя буквами.
+    Лента отдаёт ФИО кириллицей, а книжка из LogTen хранит латиницу —
+    это один человек, но буквального совпадения нет. Поэтому сравнение
+    идёт по огрублённому ключу (см. translit), который сводит оба
+    алфавита и разные системы транслитерации к одному виду.
+
+    Слияние по одной фамилии не делается: Evstafev и Evstifeev —
+    разные люди, и ключ у них тоже разный.
     """
     full = " ".join(p for p in (last, first, middle) if p)
     stmt = (
@@ -131,6 +229,7 @@ async def person_for_name(
     if found is not None:
         return found
 
+    # Точное совпадение фамилии и имени.
     stmt = select(Person).where(
         Person.pilot_id == pilot_id,
         Person.last_name == last,
@@ -142,8 +241,36 @@ async def person_for_name(
         await session.flush()
         return found
 
-    person = Person(pilot_id=pilot_id, last_name=last, first_name=first, middle_name=middle)
+    # Совпадение через транслитерацию: перебираем однофамильцев по ключу.
+    key = person_key(last, first)
+    stmt = select(Person).where(Person.pilot_id == pilot_id)
+    for candidate in (await session.execute(stmt)).scalars().all():
+        if person_key(candidate.last_name, candidate.first_name) == key:
+            candidate.aliases.append(PersonAlias(alias=full))
+            if (
+                not candidate.middle_name
+                and middle
+                and same_script(candidate.last_name, middle)
+            ):
+                candidate.middle_name = middle
+            await session.flush()
+            return candidate
+
+    # Основное написание — латиница: отчёты уходят в зарубежные
+    # авиакомпании, там кириллицу не прочитают. Написание из ленты
+    # сохраняется в алиасах, поиск работает по обоим.
+    person = Person(
+        pilot_id=pilot_id,
+        last_name=to_display_latin(last),
+        first_name=to_display_latin(first),
+        middle_name=to_display_latin(middle),
+    )
     person.aliases.append(PersonAlias(alias=full))
+    latin_full = " ".join(
+        p for p in (person.last_name, person.first_name, person.middle_name) if p
+    )
+    if latin_full != full:
+        person.aliases.append(PersonAlias(alias=latin_full))
     session.add(person)
     await session.flush()
     return person
@@ -287,3 +414,154 @@ async def recent_flights(
         .offset(offset)
     )
     return list((await session.execute(stmt)).scalars().all())
+
+
+async def dismiss_event(session: AsyncSession, pilot_id: int, uid: str) -> bool:
+    """Помечает событие как не выполнявшееся.
+
+    Нужно, когда план поменяли задним числом и рейса не было: бот иначе
+    будет предлагать записать его бесконечно. Само событие не удаляется —
+    если оно вернётся в ленту, синхронизация восстановит статус.
+    """
+    event = await event_by_uid(session, pilot_id, uid)
+    if event is None:
+        return False
+    event.status = EventStatus.CANCELLED
+    event.cancelled_at = datetime.now(tz=event.dtstart.tzinfo)
+    await session.flush()
+    return True
+
+
+# --------------------------------------------------------------------------
+# Правка записей
+# --------------------------------------------------------------------------
+
+EDITABLE_LABELS = {
+    "times": "времена",
+    "aircraft": "борт",
+    "function": "функция",
+    "route": "маршрут",
+    "remarks": "заметка",
+}
+
+
+async def get_flight(session: AsyncSession, pilot_id: int, flight_id: int) -> Flight | None:
+    stmt = select(Flight).where(Flight.id == flight_id, Flight.pilot_id == pilot_id)
+    return (await session.execute(stmt)).scalar_one_or_none()
+
+
+async def revisions_for(
+    session: AsyncSession, flight_id: int, limit: int = 20
+) -> list[FlightRevision]:
+    stmt = (
+        select(FlightRevision)
+        .where(FlightRevision.flight_id == flight_id)
+        .order_by(FlightRevision.changed_at.desc())
+        .limit(limit)
+    )
+    return list((await session.execute(stmt)).scalars().all())
+
+
+def _log(session: AsyncSession, flight: Flight, field: str, old, new) -> None:
+    """Пишет правку в историю. Значения приводим к строке как есть."""
+    if old == new:
+        return
+    session.add(
+        FlightRevision(
+            flight_id=flight.id,
+            field=field,
+            old_value=None if old is None else str(old),
+            new_value=None if new is None else str(new),
+        )
+    )
+
+
+async def _recompute_derived(session: AsyncSession, flight: Flight) -> None:
+    """Пересчитывает то, что зависит от времён и маршрута.
+
+    Ночное время и блок-тайм нельзя оставлять от прежних значений: после
+    правки времён они стали бы неверными, а расхождение всплыло бы только
+    при сверке годовых сумм.
+    """
+    if flight.out_utc and flight.in_utc:
+        flight.block_minutes = max(
+            0, int((flight.in_utc - flight.out_utc).total_seconds() // 60)
+        )
+
+    dep = await coords_for(session, flight.dep_icao)
+    arr = await coords_for(session, flight.arr_icao)
+    if flight.out_utc and flight.in_utc:
+        computed = night_minutes(flight.out_utc, flight.in_utc, dep, arr)
+        if computed is None:
+            # Координат нет: прежнее значение оставляем, но помечаем,
+            # что оно не рассчитано, а перенесено или введено руками.
+            flight.night_computed = False
+        else:
+            flight.night_minutes = computed
+            flight.night_computed = True
+            flight.day_landings = 0 if computed else 1
+            flight.night_landings = 1 if computed else 0
+
+    if flight.off_duty_utc and flight.in_utc:
+        # Конец смены привязан к фактическому выключению.
+        flight.off_duty_utc = flight.in_utc + timedelta(minutes=30)
+    if flight.on_duty_utc and flight.off_duty_utc:
+        flight.duty_minutes = max(
+            0, int((flight.off_duty_utc - flight.on_duty_utc).total_seconds() // 60)
+        )
+
+
+async def edit_times(
+    session: AsyncSession, flight: Flight, out_utc: datetime, in_utc: datetime
+) -> Flight:
+    _log(session, flight, "out_utc", flight.out_utc, out_utc)
+    _log(session, flight, "in_utc", flight.in_utc, in_utc)
+    old_block = flight.block_minutes
+    flight.out_utc = out_utc
+    flight.in_utc = in_utc
+    await _recompute_derived(session, flight)
+    _log(session, flight, "block_minutes", old_block, flight.block_minutes)
+    await session.flush()
+    return flight
+
+
+async def edit_aircraft(
+    session: AsyncSession, flight: Flight, aircraft_id: int | None
+) -> Flight:
+    old = flight.aircraft.display if flight.aircraft else None
+    new_aircraft = await aircraft_by_id(session, aircraft_id) if aircraft_id else None
+    _log(session, flight, "aircraft", old, new_aircraft.display if new_aircraft else None)
+    flight.aircraft_id = aircraft_id
+    await session.flush()
+    return flight
+
+
+async def edit_function(session: AsyncSession, flight: Flight, function: Function) -> Flight:
+    _log(session, flight, "function", flight.function.value, function.value)
+    flight.function = function
+    flight.function_source = "изменено вручную"
+    await session.flush()
+    return flight
+
+
+async def edit_route(
+    session: AsyncSession, flight: Flight, dep_icao: str, arr_icao: str
+) -> Flight:
+    _log(session, flight, "dep_icao", flight.dep_icao, dep_icao)
+    _log(session, flight, "arr_icao", flight.arr_icao, arr_icao)
+    flight.dep_icao = dep_icao
+    flight.arr_icao = arr_icao
+    await _recompute_derived(session, flight)
+    await session.flush()
+    return flight
+
+
+async def edit_remarks(session: AsyncSession, flight: Flight, remarks: str | None) -> Flight:
+    _log(session, flight, "remarks", flight.remarks, remarks)
+    flight.remarks = remarks
+    await session.flush()
+    return flight
+
+
+async def known_airport(session: AsyncSession, icao: str) -> Airport | None:
+    return await session.get(Airport, icao.upper())

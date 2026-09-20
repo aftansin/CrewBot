@@ -244,3 +244,22 @@ def _pack(blocks: list[str]) -> list[str]:
     if buffer:
         messages.append(buffer)
     return messages
+
+
+# Названия функций пилота для показа. В интерфейсе не должно быть
+# внутренних кодов вроде "unverified".
+FUNCTION_LABEL = {
+    "pic": "КВС",
+    "picus": "КВС под надзором",
+    "copilot": "Второй пилот",
+    "cruise_relief": "Усиленный экипаж",
+    "dual": "С инструктором",
+    "fi": "Инструктор",
+    "fe": "Проверяющий",
+    "unverified": "не указана",
+}
+
+
+def function_label(value) -> str:
+    code = getattr(value, "value", value)
+    return FUNCTION_LABEL.get(code, str(code))
