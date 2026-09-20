@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -37,6 +38,55 @@ class PollManager:
     @staticmethod
     def job_id(pilot_id: int) -> str:
         return f"poll:{pilot_id}"
+
+    @staticmethod
+    def backup_job_id(pilot_id: int) -> str:
+        return f"backup:{pilot_id}"
+
+    def schedule_backup(self, pilot_id: int) -> None:
+        """Еженедельная копия книжки файлом в личку.
+
+        База — единственное место, где живут и расписание, и перенесённая
+        история. Дамп на хосте закрывает отказ сервера, а эта копия —
+        более частый случай: ошиблись командой, испортили данные правкой.
+        """
+        self._scheduler.add_job(
+            self._send_backup,
+            trigger=CronTrigger(day_of_week="sun", hour=6, minute=0),
+            kwargs={"pilot_id": pilot_id},
+            id=self.backup_job_id(pilot_id),
+            replace_existing=True,
+            coalesce=True,
+            max_instances=1,
+            misfire_grace_time=6 * 3600,
+        )
+
+    async def _send_backup(self, pilot_id: int) -> None:
+        from aiogram.types import BufferedInputFile
+
+        from app.logbook.backup import (
+            build_backup,
+            filename_for,
+            summary_text,
+            to_bytes,
+        )
+
+        try:
+            async with self._session_factory() as session:
+                data = await build_backup(session, pilot_id)
+            if not data["checksums"]["flights"]:
+                return
+            document = BufferedInputFile(to_bytes(data), filename=filename_for(pilot_id))
+            await self._sync._bot.send_document(
+                pilot_id,
+                document,
+                caption=(
+                    "\U0001f4be <b>Еженедельная копия книжки</b>\n\n"
+                    f"{summary_text(data)}"
+                ),
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("Не удалось отправить копию книжки пилоту %s", pilot_id)
 
     def schedule(self, pilot_id: int, interval_minutes: int) -> None:
         interval = max(
@@ -69,6 +119,7 @@ class PollManager:
             pilots = await repo.list_pilots(session, only_linked=True)
             for pilot in pilots:
                 self.schedule(pilot.id, pilot.poll_interval_minutes)
+                self.schedule_backup(pilot.id)
         logger.info("Восстановлено задач опроса: %s", len(pilots))
 
     async def _run(self, pilot_id: int) -> None:

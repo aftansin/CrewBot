@@ -193,6 +193,7 @@ async def receive_url(
         return
 
     poll_manager.schedule(pilot.id, pilot.poll_interval_minutes)
+    poll_manager.schedule_backup(pilot.id)
     await session.refresh(pilot)
     loaded = await repo.count_events(session, pilot.id)
     await status.edit_text(

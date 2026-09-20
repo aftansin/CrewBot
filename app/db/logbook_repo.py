@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 
 from sqlalchemy import func, or_, select
@@ -565,3 +566,188 @@ async def edit_remarks(session: AsyncSession, flight: Flight, remarks: str | Non
 
 async def known_airport(session: AsyncSession, icao: str) -> Airport | None:
     return await session.get(Airport, icao.upper())
+
+
+# --------------------------------------------------------------------------
+# Поиск по книжке
+# --------------------------------------------------------------------------
+
+
+@dataclass
+class SearchResult:
+    flights: list[Flight]
+    total: int
+    block: int
+    night: int
+    pic: int
+    copilot: int
+    partners: dict[str, int]
+    subject: str
+
+
+async def search_people(session: AsyncSession, pilot_id: int, query: str) -> list[Person]:
+    """Ищет человека по фамилии, имени или любому написанию из алиасов.
+
+    Поиск идёт и по огрублённому ключу, поэтому "Цибульников",
+    "Tsibulnikov" и "Tsybulnikov" находят одного и того же человека.
+    """
+    pattern = f"%{query.strip()}%"
+    stmt = (
+        select(Person)
+        .outerjoin(PersonAlias, PersonAlias.person_id == Person.id)
+        .where(
+            Person.pilot_id == pilot_id,
+            or_(
+                Person.last_name.ilike(pattern),
+                Person.first_name.ilike(pattern),
+                PersonAlias.alias.ilike(pattern),
+            ),
+        )
+        .distinct()
+    )
+    found = list((await session.execute(stmt)).scalars().all())
+    if found:
+        return found
+
+    key = person_key(query.strip())
+    stmt = select(Person).where(Person.pilot_id == pilot_id)
+    return [
+        p
+        for p in (await session.execute(stmt)).scalars().all()
+        if person_key(p.last_name) == key
+    ]
+
+
+async def _summarize(
+    session: AsyncSession, flights: list[Flight], subject: str, limit: int
+) -> SearchResult:
+    partners: dict[str, int] = {}
+    for flight in flights:
+        for slot in flight.crew:
+            if slot.person and not slot.person.is_owner:
+                name = slot.person.display
+                partners[name] = partners.get(name, 0) + 1
+
+    return SearchResult(
+        flights=flights[:limit],
+        total=len(flights),
+        block=sum(f.block_minutes for f in flights),
+        night=sum(f.night_minutes for f in flights),
+        pic=sum(f.easa_pic_minutes for f in flights),
+        copilot=sum(f.easa_copilot_minutes for f in flights),
+        partners=partners,
+        subject=subject,
+    )
+
+
+async def search_by_crew(
+    session: AsyncSession, pilot_id: int, query: str, limit: int = 10
+) -> SearchResult | None:
+    people = await search_people(session, pilot_id, query)
+    people = [p for p in people if not p.is_owner]
+    if not people:
+        return None
+
+    ids = [p.id for p in people]
+    stmt = (
+        select(Flight)
+        .where(
+            Flight.pilot_id == pilot_id,
+            Flight.id.in_(select(FlightCrew.flight_id).where(FlightCrew.person_id.in_(ids))),
+        )
+        .order_by(Flight.flight_date.desc())
+    )
+    flights = list((await session.execute(stmt)).scalars().all())
+    subject = ", ".join(p.display for p in people[:3])
+    return await _summarize(session, flights, subject, limit)
+
+
+async def search_by_aircraft(
+    session: AsyncSession, pilot_id: int, query: str, limit: int = 10
+) -> SearchResult | None:
+    machines = await search_aircraft(session, query, limit=20)
+    if not machines:
+        return None
+    ids = [a.id for a in machines]
+    stmt = (
+        select(Flight)
+        .where(Flight.pilot_id == pilot_id, Flight.aircraft_id.in_(ids))
+        .order_by(Flight.flight_date.desc())
+    )
+    flights = list((await session.execute(stmt)).scalars().all())
+    subject = ", ".join(a.display for a in machines[:3])
+    return await _summarize(session, flights, subject, limit)
+
+
+async def search_by_airport(
+    session: AsyncSession, pilot_id: int, query: str, limit: int = 10
+) -> SearchResult | None:
+    code = query.strip().upper()
+    if len(code) == 3:
+        mapping = await iata_to_icao_map(session, [code])
+        code = mapping.get(code, code)
+    if len(code) != 4:
+        return None
+    stmt = (
+        select(Flight)
+        .where(
+            Flight.pilot_id == pilot_id,
+            or_(Flight.dep_icao == code, Flight.arr_icao == code),
+        )
+        .order_by(Flight.flight_date.desc())
+    )
+    flights = list((await session.execute(stmt)).scalars().all())
+    if not flights:
+        return None
+
+    airport = await known_airport(session, code)
+    subject = f"{code}" + (f" \u2014 {airport.municipality}" if airport and airport.municipality else "")
+    return await _summarize(session, flights, subject, limit)
+
+
+async def create_manual_flight(
+    session: AsyncSession,
+    pilot_id: int,
+    flight_date: date,
+    dep_icao: str,
+    arr_icao: str,
+    out_utc: datetime,
+    in_utc: datetime,
+    aircraft_id: int | None = None,
+) -> Flight:
+    """Рейс, которого не было в расписании.
+
+    Перегонка, полёт на чужом типе, работа в другом месте — всё, что
+    календарь компании не показывает. Функция остаётся неподтверждённой:
+    задания на полёт нет, и вывести её не из чего — пилот задаёт сам.
+    """
+    flight = Flight(
+        pilot_id=pilot_id,
+        flight_date=flight_date,
+        dep_icao=dep_icao.upper(),
+        arr_icao=arr_icao.upper(),
+        out_utc=out_utc,
+        in_utc=in_utc,
+        aircraft_id=aircraft_id,
+        block_minutes=max(0, int((in_utc - out_utc).total_seconds() // 60)),
+        function=Function.UNVERIFIED,
+        source=FlightSource.MANUAL,
+    )
+
+    employer = await employer_for(session, pilot_id, flight_date)
+    flight.employer_id = employer.id if employer else None
+
+    dep = await coords_for(session, flight.dep_icao)
+    arr = await coords_for(session, flight.arr_icao)
+    computed = night_minutes(out_utc, in_utc, dep, arr)
+    if computed is not None:
+        flight.night_minutes = computed
+        flight.night_computed = True
+        flight.day_landings = 0 if computed else 1
+        flight.night_landings = 1 if computed else 0
+    else:
+        flight.day_landings = 1
+
+    session.add(flight)
+    await session.flush()
+    return flight

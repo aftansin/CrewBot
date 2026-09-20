@@ -10,13 +10,13 @@
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 from aiogram import F, Router
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import BufferedInputFile, CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.bot import logbook_keyboards as lkb
@@ -25,9 +25,16 @@ from app.config import Settings
 from app.db import logbook_repo as lrepo
 from app.db.models import Function, Pilot
 from app.icalendar_feed.parse import month_bounds
+from app.logbook.backup import build_backup, filename_for, summary_text, to_bytes
 from app.logbook.draft import draft_from_event, resolve_airports, suggested_function
 from app.logbook.tail import suggest_tail
-from app.logbook.timeinput import Severity, parse_and_validate
+from app.logbook.timeinput import (
+    Severity,
+    build_datetimes,
+    parse_and_validate,
+    parse_manual_flight,
+    validate,
+)
 from app.sync.render import esc, fmt_minutes, function_label
 
 logger = logging.getLogger(__name__)
@@ -42,6 +49,9 @@ class LogStates(StatesGroup):
     editing_times = State()
     editing_tail = State()
     editing_remarks = State()
+    searching = State()
+    manual_entry = State()
+    manual_tail = State()
 
 
 # --------------------------------------------------------------------------
@@ -115,8 +125,9 @@ async def show_pending(
     if not events:
         await _render(
             call,
-            "\u2705 Все рейсы за последние две недели записаны.",
-            lkb.back_to_logbook(),
+            "\u2705 Все рейсы из расписания записаны.\n\n"
+            "<i>Летали где-то ещё? Можно завести рейс вручную.</i>",
+            lkb.pending_keyboard([], tz, 0),
         )
         await call.answer()
         return
@@ -459,17 +470,21 @@ async def show_recent(
         session, pilot.id, limit=lkb.PAGE_SIZE, offset=page * lkb.PAGE_SIZE
     )
 
-    lines = [f"\U0001f4d6 <b>Записи</b>  ({total} всего)", ""]
-    for flight in flights:
-        tail = flight.aircraft.display if flight.aircraft else "\u2014"
-        night = f"  \U0001f319 {fmt_minutes(flight.night_minutes)}" if flight.night_minutes else ""
-        lines.append(
-            f"{flight.flight_date:%d.%m.%y} "
-            f"{flight.dep_icao}\u2192{flight.arr_icao} "
-            f"<b>{fmt_minutes(flight.block_minutes)}</b>{night}  {esc(tail)}"
-        )
-    lines.append("")
-    lines.append("<i>Нажмите на запись, чтобы посмотреть или поправить.</i>")
+    # Список рейсов уже на кнопках — повторять его в тексте незачем.
+    # Вместо этого показываем то, чего на кнопках нет: итог по странице.
+    page_block = sum(f.block_minutes for f in flights)
+    page_night = sum(f.night_minutes for f in flights)
+    oldest, newest = flights[-1].flight_date, flights[0].flight_date
+
+    lines = [
+        f"\U0001f4d6 <b>Записи</b>  \u2014 всего {total}",
+        "",
+        f"Страница {page + 1} из {pages}: {oldest:%d.%m.%y} \u2013 {newest:%d.%m.%y}",
+        f"Налёт на странице: <b>{fmt_minutes(page_block)}</b>"
+        + (f"   ночь {fmt_minutes(page_night)}" if page_night else ""),
+        "",
+        "<i>Нажмите на запись, чтобы посмотреть или поправить.</i>",
+    ]
     await _render(call, "\n".join(lines), lkb.recent_entry_keyboard(flights, page, pages))
     await call.answer()
 
@@ -739,3 +754,269 @@ async def show_history(
 
     await _render(call, text, lkb.flight_card_keyboard(flight.id, callback_data.page))
     await call.answer()
+
+
+
+# --------------------------------------------------------------------------
+# Поиск
+# --------------------------------------------------------------------------
+
+SEARCH_PROMPTS = {
+    "crew": (
+        "\U0001f465 <b>Поиск по экипажу</b>\n\n"
+        "Пришлите фамилию. Можно на любом языке и в любом написании \u2014 "
+        "<code>Цибульников</code>, <code>Tsibulnikov</code> и "
+        "<code>Tsybulnikov</code> найдут одного человека."
+    ),
+    "aircraft": (
+        "\u2708\ufe0f <b>Поиск по борту</b>\n\n"
+        "Пришлите регистрацию или её часть: <code>73125</code> или <code>BCD</code>."
+    ),
+    "airport": (
+        "\U0001f5fa\ufe0f <b>Поиск по аэропорту</b>\n\n"
+        "Пришлите код ICAO или IATA: <code>URSS</code> или <code>AER</code>."
+    ),
+}
+
+SEARCHERS = {
+    "crew": lrepo.search_by_crew,
+    "aircraft": lrepo.search_by_aircraft,
+    "airport": lrepo.search_by_airport,
+}
+
+
+@router.callback_query(lkb.FindCB.filter(F.kind == "menu"))
+async def search_menu(call: CallbackQuery, state: FSMContext) -> None:
+    await state.clear()
+    await _render(
+        call,
+        "\U0001f50d <b>Поиск по книжке</b>\n\nЧто ищем?",
+        lkb.search_menu(),
+    )
+    await call.answer()
+
+
+@router.callback_query(lkb.FindCB.filter(F.kind != "menu"))
+async def ask_search_query(
+    call: CallbackQuery, callback_data: lkb.FindCB, state: FSMContext
+) -> None:
+    await state.set_state(LogStates.searching)
+    await state.update_data(kind=callback_data.kind)
+    await _render(call, SEARCH_PROMPTS[callback_data.kind], lkb.search_cancel_keyboard())
+    await call.answer()
+
+
+@router.message(StateFilter(LogStates.searching), F.text)
+async def run_search(
+    message: Message, state: FSMContext, session: AsyncSession, pilot: Pilot
+) -> None:
+    data = await state.get_data()
+    kind = data.get("kind", "crew")
+    result = await SEARCHERS[kind](session, pilot.id, message.text.strip())
+
+    if result is None or not result.total:
+        await message.answer(
+            "Ничего не нашлось. Попробуйте другое написание или код.",
+            reply_markup=lkb.search_cancel_keyboard(),
+        )
+        return
+
+    lines = [
+        f"\U0001f50d <b>{esc(result.subject)}</b>",
+        "",
+        f"Рейсов: <b>{result.total}</b>   налёт: <b>{fmt_minutes(result.block)}</b>",
+    ]
+    if result.night:
+        lines.append(f"Ночь: {fmt_minutes(result.night)}")
+    if result.pic or result.copilot:
+        lines.append(
+            f"КВС {fmt_minutes(result.pic)} \u00b7 второй пилот {fmt_minutes(result.copilot)}"
+        )
+
+    lines.append("")
+    lines.append("<b>Последние рейсы</b>")
+    for flight in result.flights:
+        marker = flight.flight_number or (
+            flight.aircraft.display if flight.aircraft else ""
+        )
+        lines.append(
+            f"{flight.flight_date:%d.%m.%y} "
+            f"{flight.dep_icao}\u2192{flight.arr_icao} "
+            f"{fmt_minutes(flight.block_minutes)}  {esc(marker)}"
+        )
+    if result.total > len(result.flights):
+        lines.append(f"<i>\u2026 и ещё {result.total - len(result.flights)}</i>")
+
+    if kind != "crew" and result.partners:
+        lines.append("")
+        lines.append("<b>Чаще всего летали с</b>")
+        for name, count in sorted(result.partners.items(), key=lambda kv: -kv[1])[:5]:
+            lines.append(f"  {count:4}  {esc(name)}")
+
+    await state.clear()
+    await message.answer("\n".join(lines), reply_markup=lkb.search_cancel_keyboard())
+
+
+
+# --------------------------------------------------------------------------
+# Резервная копия
+# --------------------------------------------------------------------------
+
+
+@router.message(Command("backup"))
+async def cmd_backup(message: Message, session: AsyncSession, pilot: Pilot) -> None:
+    await _send_backup(message, session, pilot.id)
+
+
+@router.callback_query(lkb.LogCB.filter(F.action == "backup"))
+async def make_backup(call: CallbackQuery, session: AsyncSession, pilot: Pilot) -> None:
+    await call.answer("Собираю копию\u2026")
+    if call.message is not None:
+        await _send_backup(call.message, session, pilot.id)
+
+
+async def _send_backup(message: Message, session: AsyncSession, pilot_id: int) -> None:
+    data = await build_backup(session, pilot_id)
+    document = BufferedInputFile(to_bytes(data), filename=filename_for(pilot_id))
+    await message.answer_document(
+        document,
+        caption=(
+            "\U0001f4be <b>Резервная копия книжки</b>\n\n"
+            f"{summary_text(data)}\n\n"
+            "<i>Сохраните файл вне Telegram \u2014 копия в том же месте, "
+            "что и оригинал, копией не является.</i>"
+        ),
+        reply_markup=lkb.back_to_logbook(),
+    )
+
+
+
+# --------------------------------------------------------------------------
+# Ручной ввод рейса
+# --------------------------------------------------------------------------
+
+
+@router.callback_query(lkb.LogCB.filter(F.action == "manual"))
+async def ask_manual_flight(call: CallbackQuery, state: FSMContext) -> None:
+    """Рейс, которого нет в расписании: перегонка, полёт в другом месте."""
+    await state.set_state(LogStates.manual_entry)
+    await _render(
+        call,
+        "\u270d\ufe0f <b>Рейс вручную</b>\n\n"
+        "Пришлите одной строкой пять значений \u2014 дату, откуда, куда "
+        "и времена запуска и выключения <u>в UTC</u>:\n\n"
+        "<code>14.09.2026 UUEE UIII 2238 0401</code>\n\n"
+        "<i>Коды аэропортов в ICAO, из четырёх букв.</i>",
+        lkb.manual_entry_keyboard(),
+    )
+    await call.answer()
+
+
+@router.message(StateFilter(LogStates.manual_entry), F.text)
+async def receive_manual_flight(
+    message: Message, state: FSMContext, session: AsyncSession, pilot: Pilot,
+    settings: Settings,
+) -> None:
+    tz = pilot_tz(pilot, settings)
+    parsed = parse_manual_flight(message.text, datetime.now(tz=tz).date())
+
+    if not parsed.ok:
+        text = "\n".join(
+            f"\u274c {esc(i.message)}" + (f"\n   <i>{esc(i.hint)}</i>" if i.hint else "")
+            for i in parsed.issues
+        )
+        await message.answer(f"{text}\n\nПопробуйте ещё раз.")
+        return
+
+    out_dt, in_dt = build_datetimes(
+        datetime.combine(parsed.flight_date, datetime.min.time(), tzinfo=UTC),
+        parsed.out,
+        parsed.inn,
+    )
+    issues = validate(out_dt, in_dt)
+    if any(i.severity == Severity.ERROR for i in issues):
+        text = "\n".join(f"\u274c {esc(i.message)}" for i in issues)
+        await message.answer(f"{text}\n\nПопробуйте ещё раз.")
+        return
+
+    # Неизвестный аэропорт не запрещаем: книжка не обязана знать все
+    # площадки мира. Но предупреждаем — по нему не посчитается ночное.
+    warnings = [f"\u26a0\ufe0f {esc(i.message)}" for i in issues]
+    for code in (parsed.dep, parsed.arr):
+        if await lrepo.known_airport(session, code) is None:
+            warnings.append(
+                f"\u26a0\ufe0f Аэропорт {code} не в справочнике \u2014 "
+                "ночное время по нему не посчитается."
+            )
+
+    await state.set_state(LogStates.manual_tail)
+    await state.update_data(
+        manual={
+            "date": parsed.flight_date.isoformat(),
+            "dep": parsed.dep,
+            "arr": parsed.arr,
+            "out": out_dt.isoformat(),
+            "inn": in_dt.isoformat(),
+        }
+    )
+
+    block = int((in_dt - out_dt).total_seconds() // 60)
+    lines = [
+        f"\u2708\ufe0f {parsed.dep} \u2192 {parsed.arr}  "
+        f"{parsed.flight_date:%d.%m.%Y}",
+        f"Блок-тайм: <b>{fmt_minutes(block)}</b>",
+    ]
+    lines.extend(warnings)
+    lines += ["", "<b>Какой борт?</b>", "Пришлите регистрацию или её часть."]
+    await message.answer("\n".join(lines), reply_markup=lkb.manual_entry_keyboard())
+
+
+@router.message(StateFilter(LogStates.manual_tail), F.text)
+async def search_manual_tail(
+    message: Message, state: FSMContext, session: AsyncSession
+) -> None:
+    found = await lrepo.search_aircraft(session, message.text.strip())
+    if not found:
+        await message.answer(
+            "Ничего не нашлось. Попробуйте другую часть номера.\n"
+            "<i>Если борта нет в книжке, заведите его через правку "
+            "уже записанного рейса.</i>"
+        )
+        return
+    await message.answer(
+        f"Найдено: {len(found)}", reply_markup=lkb.manual_tail_keyboard(found)
+    )
+
+
+@router.callback_query(lkb.ManualTailCB.filter())
+async def save_manual_flight(
+    call: CallbackQuery, callback_data: lkb.ManualTailCB, session: AsyncSession,
+    pilot: Pilot, settings: Settings, state: FSMContext,
+) -> None:
+    data = (await state.get_data()).get("manual")
+    if not data:
+        await call.answer("Сессия истекла, начните заново", show_alert=True)
+        return
+
+    flight = await lrepo.create_manual_flight(
+        session,
+        pilot.id,
+        flight_date=date.fromisoformat(data["date"]),
+        dep_icao=data["dep"],
+        arr_icao=data["arr"],
+        out_utc=datetime.fromisoformat(data["out"]),
+        in_utc=datetime.fromisoformat(data["inn"]),
+        aircraft_id=callback_data.aircraft_id,
+    )
+    await session.commit()
+    await state.clear()
+
+    tz = pilot_tz(pilot, settings)
+    await _render(
+        call,
+        "\u2705 <b>Записано вручную</b>\n\n"
+        + _flight_card(flight, tz)
+        + "\n\n<i>Функцию и заметку можно задать кнопками ниже.</i>",
+        lkb.flight_card_keyboard(flight.id, 0),
+    )
+    await call.answer("Сохранено")

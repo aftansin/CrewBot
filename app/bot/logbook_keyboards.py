@@ -31,6 +31,8 @@ def logbook_menu() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text="\u2708\ufe0f Записать рейс", callback_data=LogCB(action="pending"))
     builder.button(text="\U0001f4d6 Последние записи", callback_data=LogCB(action="recent"))
+    builder.button(text="\U0001f50d Поиск", callback_data=FindCB(kind="menu"))
+    builder.button(text="\U0001f4be Резервная копия", callback_data=LogCB(action="backup"))
     builder.button(text="\u25c0\ufe0f Меню", callback_data=MenuCB(action="main"))
     builder.adjust(1)
     return builder.as_markup()
@@ -73,9 +75,21 @@ def pending_keyboard(events: list[Event], tz, page: int = 0) -> InlineKeyboardMa
     _pager(builder, "pending", page, pages)
     builder.row(
         InlineKeyboardButton(
+            text="\u270d\ufe0f Записать вручную",
+            callback_data=LogCB(action="manual").pack(),
+        )
+    )
+    builder.row(
+        InlineKeyboardButton(
             text="\u25c0\ufe0f Книжка", callback_data=LogCB(action="menu").pack()
         )
     )
+    return builder.as_markup()
+
+
+def manual_entry_keyboard() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="\u274c Отмена", callback_data=LogCB(action="menu"))
     return builder.as_markup()
 
 
@@ -283,10 +297,14 @@ def recent_entry_keyboard(flights, page: int, pages: int) -> InlineKeyboardMarku
     """Записи кликабельны: нажатие открывает карточку рейса."""
     builder = InlineKeyboardBuilder()
     for flight in flights:
-        tail = flight.aircraft.display if flight.aircraft else "\u2014"
+        # Номер рейса полезнее бортового: по нему узнаёшь рейс с ходу.
+        # Борт виден в карточке, а если номера нет — он и подставится.
+        marker = flight.flight_number or (
+            flight.aircraft.display if flight.aircraft else ""
+        )
         label = (
             f"{flight.flight_date:%d.%m.%y} "
-            f"{flight.dep_icao}\u2192{flight.arr_icao} {tail}"
+            f"{flight.dep_icao}\u2192{flight.arr_icao} {marker}".rstrip()
         )
         builder.row(
             InlineKeyboardButton(
@@ -300,6 +318,57 @@ def recent_entry_keyboard(flights, page: int, pages: int) -> InlineKeyboardMarku
     builder.row(
         InlineKeyboardButton(
             text="\u25c0\ufe0f Книжка", callback_data=LogCB(action="menu").pack()
+        )
+    )
+    return builder.as_markup()
+
+
+class FindCB(CallbackData, prefix="find"):
+    """Поиск по книжке."""
+    kind: str = "menu"   # menu | crew | aircraft | airport
+
+
+def search_menu() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="\U0001f465 По экипажу", callback_data=FindCB(kind="crew"))
+    builder.button(text="\u2708\ufe0f По борту", callback_data=FindCB(kind="aircraft"))
+    builder.button(text="\U0001f5fa\ufe0f По аэропорту", callback_data=FindCB(kind="airport"))
+    builder.adjust(1)
+    builder.row(
+        InlineKeyboardButton(
+            text="\u25c0\ufe0f Книжка", callback_data=LogCB(action="menu").pack()
+        )
+    )
+    return builder.as_markup()
+
+
+def search_cancel_keyboard() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="\u25c0\ufe0f Другой поиск", callback_data=FindCB(kind="menu"))
+    builder.button(text="\U0001f4d2 Книжка", callback_data=LogCB(action="menu"))
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+class ManualTailCB(CallbackData, prefix="mtail"):
+    aircraft_id: int
+
+
+def manual_tail_keyboard(found) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    for aircraft in found:
+        label = aircraft.display
+        if aircraft.registration_ra and aircraft.registration != aircraft.registration_ra:
+            label = f"{aircraft.registration_ra} ({aircraft.registration})"
+        builder.row(
+            InlineKeyboardButton(
+                text=label[:64],
+                callback_data=ManualTailCB(aircraft_id=aircraft.id).pack(),
+            )
+        )
+    builder.row(
+        InlineKeyboardButton(
+            text="\u274c Отмена", callback_data=LogCB(action="menu").pack()
         )
     )
     return builder.as_markup()

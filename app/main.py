@@ -30,6 +30,7 @@ BOT_COMMANDS = [
     BotCommand(command="plan", description="Мой план"),
     BotCommand(command="stats", description="Налёт за месяц"),
     BotCommand(command="logbook", description="Лётная книжка"),
+    BotCommand(command="backup", description="Резервная копия книжки"),
     BotCommand(command="settings", description="Настройки"),
     BotCommand(command="help", description="Справка"),
     BotCommand(command="delete", description="Удалить мои данные"),
