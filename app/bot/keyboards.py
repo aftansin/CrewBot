@@ -28,6 +28,14 @@ class LogbookEntryCB(CallbackData, prefix="log"):
     page: int = 0
 
 
+class BackupCB(CallbackData, prefix="log"):
+    """Копия книжки из настроек. Префикс тот же, что у LogCB, —
+    нажатие сразу попадает в роутер книжки."""
+    action: str = "backup"
+    uid: str = ""
+    page: int = 0
+
+
 class MenuCB(CallbackData, prefix="menu"):
     action: str  # main | refresh | plan | stats | settings | link | unlink | help
 
@@ -164,6 +172,12 @@ def settings_keyboard(current_interval: int, notifications_on: bool) -> InlineKe
     bell = "\U0001f514 Уведомления: вкл" if notifications_on else "\U0001f515 Уведомления: выкл"
     builder.row(
         InlineKeyboardButton(text=bell, callback_data=MenuCB(action="toggle_notify").pack())
+    )
+    builder.row(
+        InlineKeyboardButton(
+            text="\U0001f4be Резервная копия книжки",
+            callback_data=BackupCB().pack(),
+        )
     )
     builder.row(
         InlineKeyboardButton(

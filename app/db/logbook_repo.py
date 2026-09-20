@@ -751,3 +751,26 @@ async def create_manual_flight(
     session.add(flight)
     await session.flush()
     return flight
+
+
+async def crew_of(session: AsyncSession, flight_id: int) -> list[tuple[str, str]]:
+    """Экипаж рейса: пары (ФИО, должность), владелец книжки первым."""
+    labels = {
+        CrewRole.PIC: "КВС",
+        CrewRole.SIC: "Второй пилот",
+        CrewRole.RELIEF: "Усиление",
+        CrewRole.RELIEF2: "Усиление",
+        CrewRole.INSTRUCTOR: "Инструктор",
+        CrewRole.STUDENT: "Стажёр",
+        CrewRole.OBSERVER: "Проверяющий",
+        CrewRole.CABIN: "Бортпроводник",
+    }
+    order = list(labels)
+    stmt = select(FlightCrew).where(FlightCrew.flight_id == flight_id)
+    links = list((await session.execute(stmt)).scalars().all())
+    links.sort(key=lambda link: (order.index(link.role) if link.role in order else 99))
+    return [
+        (link.person.display, labels.get(link.role, link.role.value))
+        for link in links
+        if link.person
+    ]

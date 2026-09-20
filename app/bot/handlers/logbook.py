@@ -23,7 +23,7 @@ from app.bot import logbook_keyboards as lkb
 from app.bot.handlers.user import _render, pilot_tz
 from app.config import Settings
 from app.db import logbook_repo as lrepo
-from app.db.models import Function, Pilot
+from app.db.models import FlightSource, Function, Pilot
 from app.icalendar_feed.parse import month_bounds
 from app.logbook.backup import build_backup, filename_for, summary_text, to_bytes
 from app.logbook.draft import draft_from_event, resolve_airports, suggested_function
@@ -495,31 +495,55 @@ async def show_recent(
 # --------------------------------------------------------------------------
 
 
-def _flight_card(flight, tz) -> str:
+def _night_note(flight) -> str:
+    """Откуда взято ночное время.
+
+    "не рассчитано" на перенесённой записи вводит в заблуждение: там оно
+    посчитано LogTen и верно. Формулой пересчитываются только новые
+    рейсы — на годах до 2022 старые цифры расходятся с ней до получаса,
+    и переписывать их было бы подгонкой.
+    """
+    if flight.night_computed:
+        return ""
+    if flight.source is FlightSource.LOGTEN:
+        return "  <i>(из LogTen)</i>"
+    return "  <i>(нет координат аэропорта)</i>"
+
+
+def _flight_card(flight, tz, crew=None) -> str:
     tail = flight.aircraft.display if flight.aircraft else "\u2014"
+    times = (
+        f"{flight.out_utc:%H:%M} \u2013 {flight.in_utc:%H:%M} UTC"
+        if flight.out_utc and flight.in_utc
+        else ""
+    )
+
     lines = [
-        f"\u2708\ufe0f <b>{esc(flight.flight_number or 'рейс')}</b>  "
-        f"{flight.dep_icao}\u2192{flight.arr_icao}",
-        f"{flight.flight_date:%d.%m.%Y}",
+        f"\u2708\ufe0f <b>{esc(flight.flight_number or 'Рейс')}</b>   "
+        f"{flight.dep_icao} \u2192 {flight.arr_icao}",
+        f"<b>{flight.flight_date:%d.%m.%Y}</b>" + (f"   {times}" if times else ""),
         "",
+        f"Блок-тайм   <b>{fmt_minutes(flight.block_minutes)}</b>",
     ]
-    if flight.out_utc and flight.in_utc:
+    if flight.night_minutes:
         lines.append(
-            f"Запуск \u2013 выключение: "
-            f"<b>{flight.out_utc:%H:%M}\u2013{flight.in_utc:%H:%M} UTC</b>"
+            f"Ночь        {fmt_minutes(flight.night_minutes)}{_night_note(flight)}"
         )
-    lines += [
-        f"Блок-тайм: <b>{fmt_minutes(flight.block_minutes)}</b>",
-        f"Ночь: {fmt_minutes(flight.night_minutes)}"
-        + ("" if flight.night_computed else "  <i>(не рассчитано)</i>"),
-        f"Борт: <b>{esc(tail)}</b>",
-        f"Функция: <b>{esc(function_label(flight.function))}</b>",
-    ]
+    lines.append(f"Борт        <b>{esc(tail)}</b>")
+    lines.append(f"Функция     <b>{esc(function_label(flight.function))}</b>")
     if flight.duty_minutes:
-        lines.append(f"Рабочее время: {fmt_minutes(flight.duty_minutes)}")
+        lines.append(f"Смена       {fmt_minutes(flight.duty_minutes)}")
+
+    if crew:
+        lines.append("")
+        lines.append("<b>Экипаж</b>")
+        for person, role in crew:
+            lines.append(f"\u2022 {esc(person)} \u2014 {esc(role)}")
+
     if flight.remarks:
         lines.append("")
-        lines.append(f"\U0001f4dd {esc(flight.remarks)}")
+        lines.append(f"\U0001f4dd <i>{esc(flight.remarks)}</i>")
+
     return "\n".join(lines)
 
 
@@ -538,9 +562,10 @@ async def open_flight(
         await call.answer("Запись не найдена", show_alert=True)
         return
     tz = pilot_tz(pilot, settings)
+    crew = await lrepo.crew_of(session, flight.id)
     await _render(
         call,
-        _flight_card(flight, tz),
+        _flight_card(flight, tz, crew),
         lkb.flight_card_keyboard(flight.id, callback_data.page),
     )
     await call.answer()

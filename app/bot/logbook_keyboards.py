@@ -32,7 +32,6 @@ def logbook_menu() -> InlineKeyboardMarkup:
     builder.button(text="\u2708\ufe0f Записать рейс", callback_data=LogCB(action="pending"))
     builder.button(text="\U0001f4d6 Последние записи", callback_data=LogCB(action="recent"))
     builder.button(text="\U0001f50d Поиск", callback_data=FindCB(kind="menu"))
-    builder.button(text="\U0001f4be Резервная копия", callback_data=LogCB(action="backup"))
     builder.button(text="\u25c0\ufe0f Меню", callback_data=MenuCB(action="main"))
     builder.adjust(1)
     return builder.as_markup()
