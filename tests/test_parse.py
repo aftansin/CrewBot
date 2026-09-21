@@ -187,3 +187,27 @@ def test_broken_event_is_skipped_not_fatal():
     raw = FIXTURE.read_text(encoding="utf-8").replace("UID:3001\n", "")
     events, _ = parse_feed(raw, TZ)
     assert len(events) == 6
+
+
+def test_deadhead_not_classified_as_flight():
+    """Перелёт пассажиром (чемодан) — не налёт, хотя в строке есть и самолёт."""
+    from app.icalendar_feed.parse import classify
+
+    summary = "SU427 \U0001f9f3 Sharm el Sheikh (SSH) \u2192 Moscow (SVO)"
+    assert classify(summary) is EventKind.DEADHEAD
+
+
+def test_simulator_under_clipboard_emoji():
+    """Тренажёр приходит под значком планшета, но это не явка."""
+    from app.icalendar_feed.parse import classify
+
+    assert classify("\U0001f4cb Flight Simulator") is EventKind.SIMULATOR
+    # А обычная явка под тем же значком остаётся reporting.
+    assert classify("\U0001f4cb Reporting ПП перед ТРЖ") is EventKind.REPORTING
+
+
+def test_day_off_and_medical_by_emoji():
+    from app.icalendar_feed.parse import classify
+
+    assert classify("\U0001f3e0 Выходной, 1 день") is EventKind.REST
+    assert classify("\U0001f489 Медкомиссия, 2 дня") is EventKind.MEDICAL

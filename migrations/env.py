@@ -7,8 +7,8 @@ from alembic import context
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.config import get_settings
-from app.db.base import Base
 from app.db import models  # noqa: F401 — импорт нужен, чтобы модели попали в metadata
+from app.db.base import Base
 
 config = context.config
 

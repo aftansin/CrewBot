@@ -5,15 +5,15 @@ Revises: 0001
 """
 from __future__ import annotations
 
-from typing import Sequence, Union
+from collections.abc import Sequence
 
 import sqlalchemy as sa
 from alembic import op
 
 revision: str = "0002"
-down_revision: Union[str, None] = "0001"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = "0001"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 FUNCTION = sa.Enum("PIC", "PICUS", "COPILOT", "CRUISE_RELIEF", "DUAL", "FI", "FE",
                    "UNVERIFIED", name="flight_function", native_enum=False, length=20)

@@ -49,6 +49,7 @@ class EventKind(str, enum.Enum):
     MEDICAL = "medical"        # медкомиссия, ВЛЭК
     REPORTING = "reporting"    # явка, reporting
     STANDBY = "standby"        # резерв
+    DEADHEAD = "deadhead"      # перелёт пассажиром (в книжку без налёта)
     DUTY = "duty"              # прочая наземная работа
     REST = "rest"              # выходной, отпуск
     OTHER = "other"

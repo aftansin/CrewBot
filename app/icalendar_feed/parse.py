@@ -42,13 +42,18 @@ class ParseError(Exception):
 
 # Эмодзи-маркер в начале SUMMARY — самый надёжный признак. Проверяется первым.
 EMOJI_RULES: tuple[tuple[EventKind, tuple[str, ...]], ...] = (
+    # Перелёт пассажиром: чемодан. Проверяется ПЕРВЫМ, до самолёта —
+    # в таком событии есть оба значка, но налётом это не является.
+    (EventKind.DEADHEAD, ("\U0001f9f3",)),                # чемодан
     (EventKind.FLIGHT, ("\u2708",)),                      # самолёт
     (EventKind.MEDICAL, ("\U0001f489", "\U0001fa7a")),    # шприц, стетоскоп
-    (EventKind.REST, ("\U0001f3dd", "\U0001f334")),       # остров, пальма
+    (EventKind.REST, ("\U0001f3dd", "\U0001f334", "\U0001f3e0")),  # остров, пальма, дом
     (EventKind.TRAINING, ("\U0001f468\u200d\U0001f393",   # студент
                           "\U0001f469\u200d\U0001f393",
                           "\U0001f393",
                           "\U0001f4da")),
+    # Планшет — reporting, НО тренажёр под тем же значком ловится
+    # ключевым словом ниже раньше, чем сюда дойдёт.
     (EventKind.REPORTING, ("\U0001f4cb",)),               # планшет
 )
 
@@ -65,13 +70,27 @@ KEYWORD_RULES: tuple[tuple[EventKind, tuple[str, ...]], ...] = (
 )
 
 
+# Слова, которые должны переопределить эмодзи-планшет: под 📋 приходит
+# и явка, и тренажёр, а это разные вещи.
+OVERRIDE_KEYWORDS: tuple[tuple[EventKind, tuple[str, ...]], ...] = (
+    (EventKind.SIMULATOR, ("simulator", "тренаж", "симулятор", "fftd", " ftd", " ffs")),
+)
+
+
 def classify(summary: str) -> EventKind:
     """Определяет тип события по СЫРОМУ summary, до очистки от эмодзи."""
+    haystack = " " + summary.lower()
+
+    # Переопределения идут первыми: "Flight Simulator" под значком планшета
+    # иначе разберётся как явка.
+    for kind, keywords in OVERRIDE_KEYWORDS:
+        if any(word in haystack for word in keywords):
+            return kind
+
     for kind, markers in EMOJI_RULES:
         if any(marker in summary for marker in markers):
             return kind
 
-    haystack = " " + summary.lower()
     for kind, keywords in KEYWORD_RULES:
         if any(word in haystack for word in keywords):
             return kind
