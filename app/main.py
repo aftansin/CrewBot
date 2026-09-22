@@ -69,7 +69,12 @@ async def run() -> None:
     fetcher = FeedFetcher(
         timeout_seconds=settings.http_timeout_seconds,
         retries=settings.http_retries,
+        proxies=settings.calendar_proxies,
+        user_agent=settings.calendar_user_agent,
     )
+    if settings.calendar_proxies:
+        logger.info("Запросы к календарю через прокси: %s узла(ов)",
+                    len(settings.calendar_proxies))
     await fetcher.start()
 
     sync_service = SyncService(bot, session_factory, fetcher, settings)

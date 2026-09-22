@@ -32,6 +32,14 @@ class Settings(BaseSettings):
     ics_url_prefix: str = "https://crew.aeroflot.ru/api/calendar/ics/"
     http_timeout_seconds: int = 30
     http_retries: int = 3
+    # Прокси для запросов к календарю, через запятую. Пусто — напрямую.
+    # Формат: socks5://host:port или http://host:port (с логином:
+    # socks5://user:pass@host:port). Выбирается случайно на каждый запрос.
+    calendar_proxies_raw: str = Field(default="", validation_alias="CALENDAR_PROXIES")
+    # Как бот представляется провайдеру. Честное самоназвание, не маскировка.
+    calendar_user_agent: str = "CrewApp/2.0 (+calendar subscription client)"
+    # Условные запросы: спрашивать провайдера, изменилась ли лента.
+    conditional_requests: bool = True
 
     # --- Опрос ---
     # Интервал по умолчанию для новых пилотов, в минутах.
@@ -65,6 +73,10 @@ class Settings(BaseSettings):
     @property
     def default_tz(self) -> ZoneInfo:
         return ZoneInfo(self.default_timezone)
+
+    @property
+    def calendar_proxies(self) -> list[int]:
+        return [p.strip() for p in re.split(r"[,\s]+", self.calendar_proxies_raw) if p.strip()]
 
     @property
     def admin_ids(self) -> list[int]:

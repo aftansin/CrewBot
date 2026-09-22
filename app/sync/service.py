@@ -31,6 +31,8 @@ class SyncResult:
     diff: Diff | None = None
     error: str | None = None
     first_run: bool = False
+    # Провайдер ответил 304 — лента не менялась, разбор не потребовался.
+    not_modified: bool = False
 
     @property
     def ok(self) -> bool:
@@ -79,10 +81,21 @@ class SyncService:
         tz = _tz_of(pilot, self._settings)
 
         try:
-            raw = await self._fetcher.fetch(pilot.ics_url)
+            # Автоматический опрос пользуется условными запросами: если лента
+            # не менялась, провайдер вернёт 304, и мы сразу выходим.
+            # Ручное «Обновить» всегда тянет ленту целиком.
+            raw = await self._fetcher.fetch(
+                pilot.ics_url,
+                allow_not_modified=self._settings.conditional_requests and not notify,
+            )
         except FeedError as exc:
             await repo.set_sync_result(session, pilot, SyncStatus.FETCH_ERROR, str(exc))
             return SyncResult(status=SyncStatus.FETCH_ERROR, error=str(exc))
+
+        if raw is None:
+            # 304 Not Modified: план не изменился, делать нечего.
+            await repo.set_sync_result(session, pilot, SyncStatus.OK)
+            return SyncResult(status=SyncStatus.OK, not_modified=True)
 
         try:
             parsed_events, owner = parse_feed(raw, tz)
